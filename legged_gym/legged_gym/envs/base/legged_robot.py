@@ -282,9 +282,13 @@ class LeggedRobot(BaseTask):
                 cv2.waitKey(1)
 
     def reindex_feet(self, vec):
+        if not self.cfg.env.reorder_dofs:
+            return vec
         return vec[:, [1, 0, 3, 2]]
 
     def reindex(self, vec):
+        if not self.cfg.env.reorder_dofs:
+            return vec
         return vec[:, [3, 4, 5, 0, 1, 2, 9, 10, 11, 6, 7, 8]]
 
     def check_termination(self):
