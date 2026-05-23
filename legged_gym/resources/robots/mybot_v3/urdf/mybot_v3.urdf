@@ -112,7 +112,7 @@
       link="FL_hip" />
     <axis
       xyz="1 0 0" />
-    <dynamics damping="0.0" friction="0.1" />
+    <dynamics damping="0.0" friction="0.0" />
     <limit effort="33.5" lower="-0.8" upper="0.8" velocity="28" />
   </joint>
   <link
@@ -164,7 +164,7 @@
       link="FL_thigh" />
     <axis
       xyz="0 1 0" />
-    <dynamics damping="0.0" friction="0.1" />
+    <dynamics damping="0.0" friction="0.0" />
     <limit effort="33.5" lower="-1.04" upper="4.18" velocity="28" />
   </joint>
   <link
@@ -216,8 +216,8 @@
       link="FL_calf" />
     <axis
       xyz="0 1 0" />
-    <dynamics damping="0.0" friction="0.3" />
-    <limit effort="78.17" lower="-2.69" upper="-0.91" velocity="12.0" />
+    <dynamics damping="0.0" friction="0.0" />
+    <limit effort="33.5" lower="-2.69" upper="-0.91" velocity="28.0" />
   </joint>
   <link
     name="FL_foot">
@@ -318,7 +318,7 @@
       link="FR_hip" />
     <axis
       xyz="1 0 0" />
-    <dynamics damping="0.0" friction="0.1" />
+    <dynamics damping="0.0" friction="0.0" />
     <limit effort="33.5" lower="-0.8" upper="0.8" velocity="28" />
   </joint>
   <link
@@ -370,7 +370,7 @@
       link="FR_thigh" />
     <axis
       xyz="0 1 0" />
-    <dynamics damping="0.0" friction="0.1" />
+    <dynamics damping="0.0" friction="0.0" />
     <limit effort="33.5" lower="-1.04" upper="4.18" velocity="28" />
   </joint>
   <link
@@ -422,8 +422,8 @@
       link="FR_calf" />
     <axis
       xyz="0 1 0" />
-    <dynamics damping="0.0" friction="0.3" />
-    <limit effort="78.17" lower="-2.69" upper="-0.91" velocity="12.0" />
+    <dynamics damping="0.0" friction="0.0" />
+    <limit effort="33.5" lower="-2.69" upper="-0.91" velocity="28.0" />
   </joint>
   <link
     name="FR_foot">
@@ -524,7 +524,7 @@
       link="RL_hip" />
     <axis
       xyz="1 0 0" />
-    <dynamics damping="0.0" friction="0.1" />
+    <dynamics damping="0.0" friction="0.0" />
     <limit effort="33.5" lower="-0.8" upper="0.8" velocity="28" />
   </joint>
   <link
@@ -576,7 +576,7 @@
       link="RL_thigh" />
     <axis
       xyz="0 1 0" />
-    <dynamics damping="0.0" friction="0.1" />
+    <dynamics damping="0.0" friction="0.0" />
     <limit effort="33.5" lower="-1.04" upper="4.18" velocity="28" />
   </joint>
   <link
@@ -628,8 +628,8 @@
       link="RL_calf" />
     <axis
       xyz="0 1 0" />
-    <dynamics damping="0.0" friction="0.3" />
-    <limit effort="78.17" lower="-2.69" upper="-0.91" velocity="12.0" />
+    <dynamics damping="0.0" friction="0.0" />
+    <limit effort="33.5" lower="-2.69" upper="-0.91" velocity="28.0" />
   </joint>
   <link
     name="RL_foot">
@@ -730,7 +730,7 @@
       link="RR_hip" />
     <axis
       xyz="1 0 0" />
-    <dynamics damping="0.0" friction="0.1" />
+    <dynamics damping="0.0" friction="0.0" />
     <limit effort="33.5" lower="-0.8" upper="0.8" velocity="28" />
   </joint>
   <link
@@ -782,7 +782,7 @@
       link="RR_thigh" />
     <axis
       xyz="0 1 0" />
-    <dynamics damping="0.0" friction="0.1" />
+    <dynamics damping="0.0" friction="0.0" />
     <limit effort="33.5" lower="-1.04" upper="4.18" velocity="28" />
   </joint>
   <link
@@ -834,8 +834,8 @@
       link="RR_calf" />
     <axis
       xyz="0 1 0" />
-    <dynamics damping="0.0" friction="0.3" />
-    <limit effort="78.17" lower="-2.69" upper="-0.91" velocity="12.0" />
+    <dynamics damping="0.0" friction="0.0" />
+    <limit effort="33.5" lower="-2.69" upper="-0.91" velocity="28.0" />
   </joint>
   <link
     name="RR_foot">
