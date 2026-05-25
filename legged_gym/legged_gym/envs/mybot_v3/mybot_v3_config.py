@@ -11,7 +11,7 @@ class MybotV3RoughCfg(LeggedRobotCfg):
         reorder_dofs = False
 
     class init_state(LeggedRobotCfg.init_state):
-        pos = [0.0, 0.0, 0.42]  # x,y,z [m]
+        pos = [0.0, 0.0, 0.45]  # x,y,z [m]
         default_joint_angles = {  # target angles [rad] when action = 0.0
             "FL_hip_joint": 0.1,
             "RL_hip_joint": 0.1,
@@ -31,7 +31,7 @@ class MybotV3RoughCfg(LeggedRobotCfg):
 
     class control(LeggedRobotCfg.control):
         control_type = "P"
-        stiffness = {"joint": 40.0}  # [N*m/rad]
+        stiffness = {"joint": 35.0}  # [N*m/rad]
         damping = {"joint": 1}  # [N*m*s/rad]
         action_scale = 0.25
         decimation = 4
@@ -55,12 +55,12 @@ class MybotV3RoughCfg(LeggedRobotCfg):
             ang_vel_xy = -0.05
             orientation = -1.
             dof_acc = -2.5e-7
-            collision = -10.
+            collision = -5.
             action_rate = -0.1
             delta_torques = -1.0e-7
-            torques = -0.00001
-            hip_pos = -0.5
-            dof_error = -0.04
+            torques = -0.000001
+            hip_pos = -2.0
+            dof_error = -0.05
             feet_stumble = -1
             feet_edge = -1
             
@@ -68,7 +68,7 @@ class MybotV3RoughCfg(LeggedRobotCfg):
         tracking_sigma = 0.2 # tracking reward = exp(-error^2/sigma)
         soft_dof_pos_limit = .9 # percentage of urdf limits, values above this limit are penalized
         soft_dof_vel_limit = 1
-        soft_torque_limit = 0.4
+        soft_torque_limit = 0.6   
         base_height_target = 0.26
         max_contact_force = 40. # forces above this value are penalized
 

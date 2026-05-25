@@ -30,6 +30,7 @@
 
 import numpy as np
 import os
+import inspect
 from datetime import datetime
 
 import isaacgym
@@ -61,6 +62,9 @@ def train(args):
     wandb.save(LEGGED_GYM_ENVS_DIR + "/base/legged_robot.py", policy="now")
 
     env, env_cfg = task_registry.make_env(name=args.task, args=args)
+    env_cfg_file = inspect.getsourcefile(env_cfg.__class__)
+    if env_cfg_file is not None and os.path.exists(env_cfg_file):
+        wandb.save(env_cfg_file, policy="now")
     ppo_runner, train_cfg = task_registry.make_alg_runner(log_root = log_pth, env=env, name=args.task, args=args)
     ppo_runner.learn(num_learning_iterations=train_cfg.runner.max_iterations, init_at_random_ep_len=True)
 
