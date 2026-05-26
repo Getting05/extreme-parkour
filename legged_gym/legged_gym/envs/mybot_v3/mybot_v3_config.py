@@ -31,7 +31,7 @@ class MybotV3RoughCfg(LeggedRobotCfg):
 
     class control(LeggedRobotCfg.control):
         control_type = "P"
-        stiffness = {"joint": 35.0}  # [N*m/rad]
+        stiffness = {"joint": 40.0}  # [N*m/rad]
         damping = {"joint": 1}  # [N*m*s/rad]
         action_scale = 0.25
         decimation = 4
@@ -48,19 +48,19 @@ class MybotV3RoughCfg(LeggedRobotCfg):
     class rewards:
         class scales:
             # tracking rewards
-            tracking_goal_vel = 1.5
+            tracking_goal_vel = 1.8
             tracking_yaw = 0.5
             # regularization rewards
             lin_vel_z = -1.0
             ang_vel_xy = -0.05
             orientation = -1.
-            dof_acc = -2.5e-7
+            dof_acc = -2.0e-7
             collision = -5.
             action_rate = -0.1
             delta_torques = -1.0e-7
             torques = -0.000001
-            hip_pos = -2.0
-            dof_error = -0.05
+            hip_pos = -1.5
+            dof_error = -0.04
             feet_stumble = -1
             feet_edge = -1
             
