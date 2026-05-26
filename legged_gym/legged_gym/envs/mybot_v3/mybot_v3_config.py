@@ -9,6 +9,15 @@ from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobot
 class MybotV3RoughCfg(LeggedRobotCfg):
     class env(LeggedRobotCfg.env):
         reorder_dofs = False
+        include_foot_contacts = False  # 自研机器人无足端接触传感器
+
+    class heightmap(LeggedRobotCfg.heightmap):
+        use_heightmap = True           # 启用LiDAR高程蒸馏
+        n_points = 132                 # 高程采样点数
+        update_interval = 5
+        buffer_len = 3
+        noise_std = 0.02               # LiDAR测量噪声
+        horizontal_noise = 0.02
 
     class init_state(LeggedRobotCfg.init_state):
         pos = [0.0, 0.0, 0.45]  # x,y,z [m]
@@ -17,7 +26,7 @@ class MybotV3RoughCfg(LeggedRobotCfg):
             "RL_hip_joint": 0.1,
             "FR_hip_joint": -0.1,
             "RR_hip_joint": -0.1,
-            
+
             "FL_thigh_joint": 0.8,
             "RL_thigh_joint": 1.0,
             "FR_thigh_joint": 0.8,
@@ -63,22 +72,33 @@ class MybotV3RoughCfg(LeggedRobotCfg):
             dof_error = -0.05
             feet_stumble = -1
             feet_edge = -1
-            
-        only_positive_rewards = True # if true negative total rewards are clipped at zero (avoids early termination problems)
-        tracking_sigma = 0.2 # tracking reward = exp(-error^2/sigma)
-        soft_dof_pos_limit = .9 # percentage of urdf limits, values above this limit are penalized
+
+        only_positive_rewards = True
+        tracking_sigma = 0.2
+        soft_dof_pos_limit = .9
         soft_dof_vel_limit = 1
-        soft_torque_limit = 0.6   
+        soft_torque_limit = 0.6
         base_height_target = 0.26
-        max_contact_force = 40. # forces above this value are penalized
-
-
-
+        max_contact_force = 40.
 
 
 class MybotV3RoughCfgPPO(LeggedRobotCfgPPO):
     class algorithm(LeggedRobotCfgPPO.algorithm):
         entropy_coef = 0.01
+
+    class heightmap_encoder:
+        if_heightmap = MybotV3RoughCfg.heightmap.use_heightmap
+        n_points = MybotV3RoughCfg.heightmap.n_points
+        n_proprio_student = LeggedRobotCfg.env.n_proprio - 4  # 53 - 4 = 49 (去掉foot_contacts)
+        backbone_hidden_dims = [128, 64]
+        backbone_output_dim = 32
+        hidden_size = 512
+        output_dim = 32
+        learning_rate = 1.e-3
+        num_steps_per_env = MybotV3RoughCfg.heightmap.update_interval * 24
+        latent_loss_weight = 1.0
+        action_loss_weight = 1.0
+        yaw_loss_weight = 1.0
 
     class runner(LeggedRobotCfgPPO.runner):
         run_name = ""

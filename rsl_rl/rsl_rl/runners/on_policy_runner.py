@@ -61,6 +61,7 @@ class OnPolicyRunner:
         self.policy_cfg = train_cfg["policy"]
         self.estimator_cfg = train_cfg["estimator"]
         self.depth_encoder_cfg = train_cfg["depth_encoder"]
+        self.heightmap_encoder_cfg = train_cfg.get("heightmap_encoder", {"if_heightmap": False})
         self.device = device
         self.env = env
 
@@ -77,8 +78,8 @@ class OnPolicyRunner:
         # Depth encoder
         self.if_depth = self.depth_encoder_cfg["if_depth"]
         if self.if_depth:
-            depth_backbone = DepthOnlyFCBackbone58x87(env.cfg.env.n_proprio, 
-                                                    self.policy_cfg["scan_encoder_dims"][-1], 
+            depth_backbone = DepthOnlyFCBackbone58x87(env.cfg.env.n_proprio,
+                                                    self.policy_cfg["scan_encoder_dims"][-1],
                                                     self.depth_encoder_cfg["hidden_dims"],
                                                     )
             depth_encoder = RecurrentDepthBackbone(depth_backbone, env.cfg).to(self.device)
@@ -86,15 +87,40 @@ class OnPolicyRunner:
         else:
             depth_encoder = None
             depth_actor = None
-        # self.depth_encoder = depth_encoder
-        # self.depth_encoder_optimizer = optim.Adam(self.depth_encoder.parameters(), lr=self.depth_encoder_cfg["learning_rate"])
-        # self.depth_encoder_paras = self.depth_encoder_cfg
-        # self.depth_encoder_criterion = nn.MSELoss()
+
+        # Heightmap encoder (LiDAR-based distillation)
+        self.if_heightmap = self.heightmap_encoder_cfg.get("if_heightmap", False)
+        if self.if_heightmap:
+            from rsl_rl.modules import HeightmapMLPBackbone, HeightmapEncoder
+            n_points = self.heightmap_encoder_cfg["n_points"]
+            n_proprio_student = self.heightmap_encoder_cfg["n_proprio_student"]
+            backbone_hidden_dims = self.heightmap_encoder_cfg["backbone_hidden_dims"]
+            backbone_output_dim = self.heightmap_encoder_cfg["backbone_output_dim"]
+            hidden_size = self.heightmap_encoder_cfg["hidden_size"]
+            output_dim = self.heightmap_encoder_cfg["output_dim"]
+
+            heightmap_backbone = HeightmapMLPBackbone(
+                n_points=n_points,
+                output_dim=backbone_output_dim,
+                hidden_dims=backbone_hidden_dims
+            )
+            heightmap_encoder = HeightmapEncoder(
+                backbone=heightmap_backbone,
+                n_proprio_student=n_proprio_student,
+                hidden_size=hidden_size,
+                output_dim=output_dim
+            ).to(self.device)
+            heightmap_actor = deepcopy(actor_critic.actor)
+        else:
+            heightmap_encoder = None
+            heightmap_actor = None
+
         # Create algorithm
         alg_class = eval(self.cfg["algorithm_class_name"]) # PPO
-        self.alg: PPO = alg_class(actor_critic, 
-                                  estimator, self.estimator_cfg, 
+        self.alg: PPO = alg_class(actor_critic,
+                                  estimator, self.estimator_cfg,
                                   depth_encoder, self.depth_encoder_cfg, depth_actor,
+                                  heightmap_encoder, self.heightmap_encoder_cfg, heightmap_actor,
                                   device=self.device, **self.alg_cfg)
         self.num_steps_per_env = self.cfg["num_steps_per_env"]
         self.save_interval = self.cfg["save_interval"]
@@ -109,6 +135,8 @@ class OnPolicyRunner:
         )
 
         self.learn = self.learn_RL if not self.if_depth else self.learn_vision
+        if self.if_heightmap:
+            self.learn = self.learn_heightmap
             
         # Log
         self.log_dir = log_dir
@@ -321,7 +349,210 @@ class OnPolicyRunner:
                (it-self.start_learning_iteration >= 5000 and it % (5*self.save_interval) == 0):
                     self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(it)))
             ep_infos.clear()
-    
+
+    def learn_heightmap(self, num_learning_iterations, init_at_random_ep_len=False):
+        """Second-stage distillation using LiDAR heightmap instead of depth camera.
+
+        The student (heightmap_encoder + heightmap_actor) learns to:
+        1. Encode noisy LiDAR heightmap into terrain latent (replacing scan_encoder)
+        2. Estimate yaw from heightmap + proprioception
+        3. Produce actions matching the teacher (which uses privileged scan info)
+
+        Key difference from learn_vision:
+        - Input: LiDAR heightmap (N points) instead of depth image (58x87)
+        - Proprioception: 49 dims (no foot contacts) instead of 53 dims
+        """
+        tot_iter = self.current_learning_iteration + num_learning_iterations
+        self.start_learning_iteration = copy(self.current_learning_iteration)
+
+        ep_infos = []
+        rewbuffer = deque(maxlen=100)
+        lenbuffer = deque(maxlen=100)
+        cur_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
+        cur_episode_length = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
+
+        obs = self.env.get_observations()
+        infos = {}
+        infos["heightmap"] = self.env.get_noisy_heightmap().to(self.device) if self.if_heightmap else None
+        infos["delta_yaw_ok"] = torch.ones(self.env.num_envs, dtype=torch.bool, device=self.device)
+
+        self.alg.heightmap_encoder.train()
+        self.alg.heightmap_actor.train()
+
+        n_proprio = self.env.cfg.env.n_proprio  # 53 (teacher proprio dim)
+        # foot_contacts are the last 4 dims of proprio (see compute_observations)
+        # student proprio = proprio without foot_contacts = first 49 dims
+        n_proprio_student = self.heightmap_encoder_cfg["n_proprio_student"]  # 49
+
+        num_pretrain_iter = 0
+        for it in range(self.current_learning_iteration, tot_iter):
+            start = time.time()
+            heightmap_latent_buffer = []
+            scandots_latent_buffer = []
+            actions_teacher_buffer = []
+            actions_student_buffer = []
+            yaw_buffer_student = []
+            yaw_buffer_teacher = []
+            delta_yaw_ok_buffer = []
+
+            for i in range(self.heightmap_encoder_cfg["num_steps_per_env"]):
+                if infos["heightmap"] is not None:
+                    # Teacher: get scandots latent from privileged scan info
+                    with torch.no_grad():
+                        scandots_latent = self.alg.actor_critic.actor.infer_scandots_latent(obs)
+                    scandots_latent_buffer.append(scandots_latent)
+
+                    # Student proprio: remove foot_contacts (last 4 dims of proprio)
+                    obs_prop_student = obs[:, :n_proprio_student].clone()
+                    obs_prop_student[:, 6:8] = 0  # mask yaw in student proprio
+
+                    # Student: encode heightmap
+                    heightmap_latent_and_yaw = self.alg.heightmap_encoder(
+                        infos["heightmap"].clone(), obs_prop_student
+                    )
+                    heightmap_latent = heightmap_latent_and_yaw[:, :-2]
+                    yaw = 1.5 * heightmap_latent_and_yaw[:, -2:]
+
+                    heightmap_latent_buffer.append(heightmap_latent)
+                    yaw_buffer_student.append(yaw)
+                    yaw_buffer_teacher.append(obs[:, 6:8])
+
+                # Teacher action (uses full obs with foot_contacts + privileged info)
+                with torch.no_grad():
+                    actions_teacher = self.alg.actor_critic.act_inference(
+                        obs, hist_encoding=True, scandots_latent=None
+                    )
+                    actions_teacher_buffer.append(actions_teacher)
+
+                # Student action: replace yaw with estimated yaw, use heightmap latent
+                # Mask foot_contacts in student obs to prevent observation leakage
+                obs_student = obs.clone()
+                obs_student[infos["delta_yaw_ok"], 6:8] = yaw.detach()[infos["delta_yaw_ok"]]
+                # Zero out foot_contacts in current proprio (indices 49:53)
+                obs_student[:, n_proprio_student:n_proprio] = 0
+                # Zero out foot_contacts in history portion
+                # History layout: obs[:, -history_len*n_proprio:], each frame is n_proprio dims
+                # foot_contacts are at offset [n_proprio_student : n_proprio] within each frame
+                history_start = obs_student.shape[1] - self.env.cfg.env.history_len * n_proprio
+                for h in range(self.env.cfg.env.history_len):
+                    frame_start = history_start + h * n_proprio
+                    obs_student[:, frame_start + n_proprio_student: frame_start + n_proprio] = 0
+
+                delta_yaw_ok_buffer.append(
+                    torch.nonzero(infos["delta_yaw_ok"]).size(0) / infos["delta_yaw_ok"].numel()
+                )
+                actions_student = self.alg.heightmap_actor(
+                    obs_student, hist_encoding=True, scandots_latent=heightmap_latent
+                )
+                actions_student_buffer.append(actions_student)
+
+                # Step environment
+                if it < num_pretrain_iter:
+                    obs, privileged_obs, rewards, dones, infos = self.env.step(actions_teacher.detach())
+                else:
+                    obs, privileged_obs, rewards, dones, infos = self.env.step(actions_student.detach())
+                critic_obs = privileged_obs if privileged_obs is not None else obs
+                obs, critic_obs, rewards, dones = (
+                    obs.to(self.device), critic_obs.to(self.device),
+                    rewards.to(self.device), dones.to(self.device)
+                )
+                # Move heightmap to device
+                if infos.get("heightmap") is not None:
+                    infos["heightmap"] = infos["heightmap"].to(self.device)
+
+                if self.log_dir is not None:
+                    if 'episode' in infos:
+                        ep_infos.append(infos['episode'])
+                    cur_reward_sum += rewards
+                    cur_episode_length += 1
+                    new_ids = (dones > 0).nonzero(as_tuple=False)
+                    rewbuffer.extend(cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
+                    lenbuffer.extend(cur_episode_length[new_ids][:, 0].cpu().numpy().tolist())
+                    cur_reward_sum[new_ids] = 0
+                    cur_episode_length[new_ids] = 0
+
+            stop = time.time()
+            collection_time = stop - start
+            start = stop
+
+            # Compute losses and update
+            delta_yaw_ok_percentage = sum(delta_yaw_ok_buffer) / len(delta_yaw_ok_buffer)
+            scandots_latent_buffer = torch.cat(scandots_latent_buffer, dim=0)
+            heightmap_latent_buffer = torch.cat(heightmap_latent_buffer, dim=0)
+            actions_teacher_buffer = torch.cat(actions_teacher_buffer, dim=0)
+            actions_student_buffer = torch.cat(actions_student_buffer, dim=0)
+            yaw_buffer_student = torch.cat(yaw_buffer_student, dim=0)
+            yaw_buffer_teacher = torch.cat(yaw_buffer_teacher, dim=0)
+
+            heightmap_actor_loss, yaw_loss, latent_loss = self.alg.update_heightmap_actor(
+                actions_student_buffer, actions_teacher_buffer,
+                yaw_buffer_student, yaw_buffer_teacher,
+                heightmap_latent_buffer, scandots_latent_buffer
+            )
+
+            stop = time.time()
+            learn_time = stop - start
+
+            self.alg.heightmap_encoder.detach_hidden_states()
+
+            if self.log_dir is not None:
+                self.log_heightmap(locals())
+            if (it - self.start_learning_iteration < 2500 and it % self.save_interval == 0) or \
+               (it - self.start_learning_iteration < 5000 and it % (2 * self.save_interval) == 0) or \
+               (it - self.start_learning_iteration >= 5000 and it % (5 * self.save_interval) == 0):
+                self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(it)))
+            ep_infos.clear()
+
+    def log_heightmap(self, locs, width=80, pad=35):
+        self.tot_timesteps += self.num_steps_per_env * self.env.num_envs
+        self.tot_time += locs['collection_time'] + locs['learn_time']
+        iteration_time = locs['collection_time'] + locs['learn_time']
+
+        ep_string = f''
+        wandb_dict = {}
+        if locs['ep_infos']:
+            for key in locs['ep_infos'][0]:
+                infotensor = torch.tensor([], device=self.device)
+                for ep_info in locs['ep_infos']:
+                    if not isinstance(ep_info[key], torch.Tensor):
+                        ep_info[key] = torch.Tensor([ep_info[key]])
+                    if len(ep_info[key].shape) == 0:
+                        ep_info[key] = ep_info[key].unsqueeze(0)
+                    infotensor = torch.cat((infotensor, ep_info[key].to(self.device)))
+                value = torch.mean(infotensor)
+                wandb_dict['Episode/' + key] = value
+                ep_string += f"""{f'Mean episode {key}:':>{pad}} {value:.4f}\n"""
+
+        mean_std = self.alg.actor_critic.std.mean()
+        fps = int(self.num_steps_per_env * self.env.num_envs / (locs['collection_time'] + locs['learn_time']))
+
+        wandb_dict['Loss/heightmap_actor_loss'] = locs['heightmap_actor_loss']
+        wandb_dict['Loss/yaw_loss'] = locs['yaw_loss']
+        wandb_dict['Loss/latent_loss'] = locs['latent_loss']
+        wandb_dict['Loss/delta_yaw_ok_percentage'] = locs['delta_yaw_ok_percentage']
+        wandb_dict['Perf/total_fps'] = fps
+        wandb_dict['Perf/collection_time'] = locs['collection_time']
+        wandb_dict['Perf/learning_time'] = locs['learn_time']
+
+        if len(locs['rewbuffer']) > 0:
+            wandb_dict['Train/mean_reward'] = statistics.mean(locs['rewbuffer'])
+            wandb_dict['Train/mean_episode_length'] = statistics.mean(locs['lenbuffer'])
+
+        wandb.log(wandb_dict, step=locs['it'])
+
+        str = f" \033[1m Learning iteration {locs['it']}/{locs['tot_iter']} \033[0m "
+        log_string = (f"""{'#' * width}\n"""
+                      f"""{str.center(width, ' ')}\n\n"""
+                      f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs['collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
+                      f"""{'Heightmap actor loss:':>{pad}} {locs['heightmap_actor_loss']:.4f}\n"""
+                      f"""{'Yaw loss:':>{pad}} {locs['yaw_loss']:.4f}\n"""
+                      f"""{'Latent loss:':>{pad}} {locs['latent_loss']:.4f}\n"""
+                      f"""{'Delta yaw ok %:':>{pad}} {locs['delta_yaw_ok_percentage']:.4f}\n""")
+        if len(locs['rewbuffer']) > 0:
+            log_string += f"""{'Mean reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
+            log_string += f"""{'Mean ep len:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n"""
+        print(log_string)
+
     def log_vision(self, locs, width=80, pad=35):
         self.tot_timesteps += self.num_steps_per_env * self.env.num_envs
         self.tot_time += locs['collection_time'] + locs['learn_time']
@@ -493,6 +724,9 @@ class OnPolicyRunner:
         if self.if_depth:
             state_dict['depth_encoder_state_dict'] = self.alg.depth_encoder.state_dict()
             state_dict['depth_actor_state_dict'] = self.alg.depth_actor.state_dict()
+        if self.if_heightmap:
+            state_dict['heightmap_encoder_state_dict'] = self.alg.heightmap_encoder.state_dict()
+            state_dict['heightmap_actor_state_dict'] = self.alg.heightmap_actor.state_dict()
         torch.save(state_dict, path)
 
     def load(self, path, load_optimizer=True):
@@ -513,6 +747,18 @@ class OnPolicyRunner:
             else:
                 print("No saved depth actor, Copying actor critic actor to depth actor...")
                 self.alg.depth_actor.load_state_dict(self.alg.actor_critic.actor.state_dict())
+        if self.if_heightmap:
+            if 'heightmap_encoder_state_dict' in loaded_dict:
+                print("Saved heightmap encoder detected, loading...")
+                self.alg.heightmap_encoder.load_state_dict(loaded_dict['heightmap_encoder_state_dict'])
+            else:
+                print("No saved heightmap encoder, starting from scratch...")
+            if 'heightmap_actor_state_dict' in loaded_dict:
+                print("Saved heightmap actor detected, loading...")
+                self.alg.heightmap_actor.load_state_dict(loaded_dict['heightmap_actor_state_dict'])
+            else:
+                print("No saved heightmap actor, Copying actor critic actor to heightmap actor...")
+                self.alg.heightmap_actor.load_state_dict(self.alg.actor_critic.actor.state_dict())
         if load_optimizer:
             self.alg.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
         # self.current_learning_iteration = loaded_dict['iter']
@@ -546,11 +792,4 @@ class OnPolicyRunner:
     def get_depth_encoder_inference_policy(self, device=None):
         self.alg.depth_encoder.eval()
         if device is not None:
-            self.alg.depth_encoder.to(device)
-        return self.alg.depth_encoder
-    
-    def get_disc_inference_policy(self, device=None):
-        self.alg.discriminator.eval() # switch to evaluation mode (dropout for example)
-        if device is not None:
-            self.alg.discriminator.to(device)
-        return self.alg.discriminator.inference
+            self.alg.depth_e

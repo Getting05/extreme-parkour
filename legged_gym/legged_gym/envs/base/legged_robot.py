@@ -153,6 +153,10 @@ class LeggedRobot(BaseTask):
             self.extras["depth"] = self.depth_buffer[:, -2]  # have already selected last one
         else:
             self.extras["depth"] = None
+        # Heightmap for LiDAR-based distillation
+        if hasattr(self.cfg, 'heightmap') and self.cfg.heightmap.use_heightmap:
+            # Always provide heightmap (cheap terrain query, unlike depth camera rendering)
+            self.extras["heightmap"] = self.get_noisy_heightmap()
         return self.obs_buf, self.privileged_obs_buf, self.rew_buf, self.reset_buf, self.extras
 
     def get_history_observations(self):
@@ -1166,6 +1170,35 @@ class LeggedRobot(BaseTask):
             return foot_contacts_bool
         else:
             return torch.zeros_like(foot_contacts_bool).to(self.device)
+
+    def get_noisy_heightmap(self):
+        """Get heightmap with simulated LiDAR noise for distillation.
+
+        Simulates LiDAR-based terrain sensing by adding:
+        - Gaussian noise to elevation values (measurement noise)
+        - Clipping to valid range
+
+        Returns:
+            (num_envs, n_points) noisy heightmap relative to robot base
+        """
+        if not self.cfg.terrain.measure_heights:
+            return torch.zeros(self.num_envs, self.cfg.heightmap.n_points,
+                             device=self.device, requires_grad=False)
+
+        # Use the same measured_heights as the teacher (relative to base)
+        heights = torch.clip(
+            self.root_states[:, 2].unsqueeze(1) - 0.3 - self.measured_heights, -1, 1.
+        )
+
+        # Add Gaussian noise to simulate LiDAR measurement error
+        if self.cfg.heightmap.noise_std > 0:
+            noise = torch.randn_like(heights) * self.cfg.heightmap.noise_std
+            heights = heights + noise
+
+        # Clip to valid range
+        heights = torch.clip(heights, self.cfg.heightmap.clip_min, self.cfg.heightmap.clip_max)
+
+        return heights
 
     def _get_heights(self, env_ids=None):
         """ Samples heights of the terrain at required points around each robot.

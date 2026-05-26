@@ -65,6 +65,9 @@ class PPO:
                  depth_encoder,
                  depth_encoder_paras,
                  depth_actor,
+                 heightmap_encoder=None,
+                 heightmap_encoder_paras=None,
+                 heightmap_actor=None,
                  num_learning_epochs=1,
                  num_mini_batches=1,
                  clip_param=0.2,
@@ -129,6 +132,17 @@ class PPO:
             self.depth_encoder_paras = depth_encoder_paras
             self.depth_actor = depth_actor
             self.depth_actor_optimizer = optim.Adam([*self.depth_actor.parameters(), *self.depth_encoder.parameters()], lr=depth_encoder_paras["learning_rate"])
+
+        # Heightmap encoder (LiDAR-based distillation)
+        self.if_heightmap = heightmap_encoder is not None
+        if self.if_heightmap:
+            self.heightmap_encoder = heightmap_encoder
+            self.heightmap_encoder_paras = heightmap_encoder_paras
+            self.heightmap_actor = heightmap_actor
+            self.heightmap_actor_optimizer = optim.Adam(
+                [*self.heightmap_actor.parameters(), *self.heightmap_encoder.parameters()],
+                lr=heightmap_encoder_paras["learning_rate"]
+            )
 
     def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape):
         self.storage = RolloutStorage(num_envs, num_transitions_per_env, actor_obs_shape,  critic_obs_shape, action_shape, self.device)
@@ -347,7 +361,43 @@ class PPO:
             nn.utils.clip_grad_norm_([*self.depth_actor.parameters(), *self.depth_encoder.parameters()], self.max_grad_norm)
             self.depth_actor_optimizer.step()
             return depth_encoder_loss.item(), depth_actor_loss.item()
-    
+
+    def update_heightmap_actor(self, actions_student_batch, actions_teacher_batch,
+                                yaw_student_batch, yaw_teacher_batch,
+                                heightmap_latent_batch=None, scandots_latent_batch=None):
+        """Update heightmap encoder and actor via distillation losses.
+
+        Losses:
+            - action_loss: L2 between student and teacher actions
+            - yaw_loss: L2 between student yaw estimate and teacher yaw
+            - latent_loss (optional): L2 between heightmap latent and scan_encoder latent
+        """
+        if self.if_heightmap:
+            action_weight = self.heightmap_encoder_paras.get("action_loss_weight", 1.0)
+            yaw_weight = self.heightmap_encoder_paras.get("yaw_loss_weight", 1.0)
+            latent_weight = self.heightmap_encoder_paras.get("latent_loss_weight", 1.0)
+
+            action_loss = (actions_teacher_batch.detach() - actions_student_batch).norm(p=2, dim=1).mean()
+            yaw_loss = (yaw_teacher_batch.detach() - yaw_student_batch).norm(p=2, dim=1).mean()
+
+            loss = action_weight * action_loss + yaw_weight * yaw_loss
+
+            # Optional latent distillation loss
+            latent_loss_val = 0.0
+            if heightmap_latent_batch is not None and scandots_latent_batch is not None:
+                latent_loss = (scandots_latent_batch.detach() - heightmap_latent_batch).norm(p=2, dim=1).mean()
+                loss = loss + latent_weight * latent_loss
+                latent_loss_val = latent_loss.item()
+
+            self.heightmap_actor_optimizer.zero_grad()
+            loss.backward()
+            nn.utils.clip_grad_norm_(
+                [*self.heightmap_actor.parameters(), *self.heightmap_encoder.parameters()],
+                self.max_grad_norm
+            )
+            self.heightmap_actor_optimizer.step()
+            return action_loss.item(), yaw_loss.item(), latent_loss_val
+
     def update_counter(self):
         self.counter += 1
     

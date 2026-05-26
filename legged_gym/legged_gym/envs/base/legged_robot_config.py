@@ -109,6 +109,16 @@ class LeggedRobotCfg(BaseConfig):
         scale = 1
         invert = True
 
+    class heightmap:
+        use_heightmap = False          # 启用LiDAR高程蒸馏模式
+        n_points = 132                 # 高程采样点数（与教师scan点数一致）
+        update_interval = 5            # 高程更新间隔（与depth一致）
+        buffer_len = 3                 # 时序缓冲长度
+        noise_std = 0.02               # 高程噪声标准差 [m]
+        horizontal_noise = 0.02        # 采样点水平位置噪声 [m]
+        clip_min = -1.0                # 高程裁剪下限
+        clip_max = 1.0                 # 高程裁剪上限
+
     class normalization:
         class obs_scales:
             lin_vel = 2.0
@@ -391,6 +401,20 @@ class LeggedRobotCfgPPO(BaseConfig):
         hidden_dims = 512
         learning_rate = 1.e-3
         num_steps_per_env = LeggedRobotCfg.depth.update_interval * 24
+
+    class heightmap_encoder:
+        if_heightmap = LeggedRobotCfg.heightmap.use_heightmap
+        n_points = LeggedRobotCfg.heightmap.n_points
+        n_proprio_student = LeggedRobotCfg.env.n_proprio - 4  # remove foot_contacts (4 dims)
+        backbone_hidden_dims = [128, 64]
+        backbone_output_dim = 32
+        hidden_size = 512              # GRU hidden size
+        output_dim = 32                # terrain latent dim (same as scan_encoder)
+        learning_rate = 1.e-3
+        num_steps_per_env = LeggedRobotCfg.heightmap.update_interval * 24
+        latent_loss_weight = 1.0       # weight for latent distillation loss
+        action_loss_weight = 1.0       # weight for action distillation loss
+        yaw_loss_weight = 1.0          # weight for yaw estimation loss
 
     class estimator:
         train_with_estimated_states = True
