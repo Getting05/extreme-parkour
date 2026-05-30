@@ -2,3 +2,7 @@ isaacgym*
 .ipynb_checkpoints/
 .vscode/
 *img
+build/
+install/
+log/
+deploy_cpp/reference/
