@@ -124,6 +124,9 @@ struct RobotRuntimeConfig {
   int joy_button_emergency = 8;
   bool debug_print_policy = true;
   int debug_print_interval = 50;
+
+  bool enable_debug_log_mode = true;
+  std::string debug_log_path = "parkour_debug.log";
 };
 
 RobotRuntimeConfig default_robot_runtime_config();

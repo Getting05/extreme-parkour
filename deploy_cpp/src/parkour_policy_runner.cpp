@@ -75,6 +75,25 @@ ParkourPolicyRunner::ParkourPolicyRunner(const RobotRuntimeConfig &config)
   default_dof_pos_ = tensor_from_float_array(config_.default_dof_pos, device_);
 
   validate_model_shapes();
+
+  if (config_.enable_debug_log_mode) {
+    debug_log_file_.open(config_.debug_log_path, std::ios::out | std::ios::trunc);
+    if (debug_log_file_.is_open()) {
+      std::cout << "[ParkourPolicyRunner] Debug log enabled. Saving to: "
+                << config_.debug_log_path << std::endl;
+      debug_log_file_ << "step,cmd_vx,cmd_vy,cmd_yaw";
+      for (int i = 0; i < N_PROPRIO; ++i) debug_log_file_ << ",proprio_" << i;
+      for (int i = 0; i < HEIGHTMAP_LATENT_DIM; ++i) debug_log_file_ << ",terr_lat_" << i;
+      for (int i = 0; i < 2; ++i) debug_log_file_ << ",yaw_est_" << i;
+      for (int i = 0; i < PRIV_ENCODER_OUTPUT_DIM; ++i) debug_log_file_ << ",hist_lat_" << i;
+      for (int i = 0; i < NUM_ACTIONS; ++i) debug_log_file_ << ",action_" << i;
+      for (int i = 0; i < NUM_JOINTS; ++i) debug_log_file_ << ",target_" << i;
+      debug_log_file_ << "\n";
+    } else {
+      std::cerr << "[ParkourPolicyRunner] Failed to open debug log file: "
+                << config_.debug_log_path << std::endl;
+    }
+  }
 }
 
 void ParkourPolicyRunner::validate_model_shapes() {
@@ -143,6 +162,7 @@ void ParkourPolicyRunner::reset() {
   gru_hidden_.zero_();
   obs_history_.zero_();
   last_actions_.zero_();
+  history_initialized_ = false;
   infer_count_ = 0;
 }
 
@@ -252,7 +272,9 @@ ParkourPolicyRunner::build_proprio_full(const torch::Tensor &proprio_student,
 
 void ParkourPolicyRunner::update_obs_history(
     const torch::Tensor &proprio_full) {
-  // Mask yaw in history (set [6:8] to 0 for history storage)
+  // Mask yaw in history (set [6:8] to 0 for history storage).
+  // This must match legged_robot.compute_observations(): the current frame is
+  // stored with yaw channels masked before being fed to StateHistoryEncoder.
   auto obs_for_history = proprio_full.clone();
   obs_for_history.index_put_(
       {torch::indexing::Slice(), torch::indexing::Slice(6, 8)},
@@ -260,8 +282,18 @@ void ParkourPolicyRunner::update_obs_history(
           {1, 2},
           torch::TensorOptions().dtype(torch::kFloat32).device(device_)));
 
-  // Shift history and append new observation
-  // obs_history_: (1, 10, 53) → shift left, append at end
+  // Important: IsaacGym fills the whole history buffer with the current
+  // proprioception at the beginning of an episode.  Starting deployment with a
+  // zero history puts the history encoder far outside the training distribution
+  // and usually produces a large crouching action right after switching to RL.
+  if (!history_initialized_) {
+    obs_history_ = obs_for_history.unsqueeze(1).repeat({1, HISTORY_LEN, 1});
+    history_initialized_ = true;
+    return;
+  }
+
+  // Shift history and append new observation.
+  // obs_history_: (1, 10, 53) -> shift left, append at end.
   obs_history_ = torch::cat(
       {obs_history_.index({torch::indexing::Slice(),
                            torch::indexing::Slice(1, torch::indexing::None),
@@ -370,8 +402,31 @@ void ParkourPolicyRunner::step(
     std::cout << "\n[ParkourPolicyRunner] step=" << infer_count_ << " cmd=["
               << commands[0] << "," << commands[1] << "," << commands[2]
               << "] action[0:3]=[" << actions[0] << "," << actions[1] << ","
-              << actions[2] << "] yaw_est=[" << yaw_cpu.data_ptr<float>()[0]
-              << "," << yaw_cpu.data_ptr<float>()[1] << "]" << std::endl;
+              << actions[2] << "] target[0:3]=[" << target_dof_pos[0] << ","
+              << target_dof_pos[1] << "," << target_dof_pos[2] << "] yaw_est=["
+              << yaw_cpu.data_ptr<float>()[0] << ","
+              << yaw_cpu.data_ptr<float>()[1] << "]" << std::endl;
+  }
+
+  if (config_.enable_debug_log_mode && debug_log_file_.is_open()) {
+    debug_log_file_ << infer_count_ << "," << commands[0] << "," << commands[1] << "," << commands[2];
+    
+    auto prop_ptr = proprio_full.cpu().contiguous().data_ptr<float>();
+    for (int i = 0; i < N_PROPRIO; ++i) debug_log_file_ << "," << prop_ptr[i];
+    
+    auto terr_ptr = terrain_latent.cpu().contiguous().data_ptr<float>();
+    for (int i = 0; i < HEIGHTMAP_LATENT_DIM; ++i) debug_log_file_ << "," << terr_ptr[i];
+    
+    auto yaw_ptr = yaw_estimate.cpu().contiguous().data_ptr<float>();
+    for (int i = 0; i < 2; ++i) debug_log_file_ << "," << yaw_ptr[i];
+    
+    auto hist_ptr = hist_latent.cpu().contiguous().data_ptr<float>();
+    for (int i = 0; i < PRIV_ENCODER_OUTPUT_DIM; ++i) debug_log_file_ << "," << hist_ptr[i];
+    
+    for (int i = 0; i < NUM_ACTIONS; ++i) debug_log_file_ << "," << actions[i];
+    for (int i = 0; i < NUM_JOINTS; ++i) debug_log_file_ << "," << target_dof_pos[i];
+    
+    debug_log_file_ << "\n";
   }
 }
 

@@ -1,6 +1,6 @@
 /**
  * @file height_subscriber.h
- * @brief Subscriber for 11x7 terrain-to-body distance measurements.
+ * @brief Subscriber for 12x11 terrain-to-body distance measurements.
  */
 #pragma once
 

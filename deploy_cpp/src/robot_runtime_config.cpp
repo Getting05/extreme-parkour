@@ -303,6 +303,10 @@ RobotRuntimeConfig load_robot_runtime_config(const std::string &yaml_file) {
       root, "debug_print_policy", cfg.debug_print_policy);
   cfg.debug_print_interval = parse_optional<int>(
       root, "debug_print_interval", cfg.debug_print_interval);
+  cfg.enable_debug_log_mode = parse_optional<bool>(
+      root, "enable_debug_log_mode", cfg.enable_debug_log_mode);
+  cfg.debug_log_path = parse_optional<std::string>(
+      root, "debug_log_path", cfg.debug_log_path);
 
   // Build motor_map from joint_mapping and motor_is_reversed
   const YAML::Node motor_ports = root["motor_port_idx"];

@@ -17,6 +17,7 @@
 
 #include <array>
 #include <string>
+#include <fstream>
 
 #include <torch/script.h>
 #include <torch/torch.h>
@@ -89,7 +90,11 @@ private:
   // Default dof pos tensor
   torch::Tensor default_dof_pos_; // (1, NUM_JOINTS)
 
+  bool history_initialized_ = false;
+
   uint64_t infer_count_ = 0;
+  
+  std::ofstream debug_log_file_;
 };
 
 } // namespace deploy
