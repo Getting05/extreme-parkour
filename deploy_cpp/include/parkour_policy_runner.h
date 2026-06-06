@@ -4,7 +4,8 @@
  *
  * Three JIT sub-models (Approach B):
  *   1. heightmap_encoder: HeightmapEncoder(backbone+GRU+output_mlp)
- *      Input:  heightmap(1,132) + proprio(1,49) + hidden(1,1,512)
+ *      Input:  processed heightmap(1,132) + yaw-masked proprio(1,49) +
+ * hidden(1,1,512)
  *      Output: latent_yaw(1,34) + new_hidden(1,1,512)
  *   2. history_encoder: StateHistoryEncoder
  *      Input:  history(1,10,53)
@@ -39,7 +40,9 @@ public:
    * @param projected_gravity [gx, gy, gz] projected gravity from IMU
    * @param dof_pos        Current joint positions (URDF order)
    * @param dof_vel        Current joint velocities (URDF order)
-   * @param height_measurements  132 height points from LiDAR
+   * @param height_measurements  132 processed heightmap obs values
+   * @param goal_yaw       [0, delta_yaw, delta_next_yaw] from planner/sim
+   * @param goal_yaw_ready Whether goal_yaw should override encoder yaw
    * @param target_dof_pos [out] Target joint positions for PD control
    * @param actions        [out] Raw policy actions
    */
@@ -49,6 +52,7 @@ public:
             const std::array<float, NUM_JOINTS> &dof_pos,
             const std::array<float, NUM_JOINTS> &dof_vel,
             const std::array<float, NUM_HEIGHT_POINTS> &height_measurements,
+            const std::array<float, 3> &goal_yaw, bool goal_yaw_ready,
             std::array<float, NUM_JOINTS> &target_dof_pos,
             std::array<float, NUM_ACTIONS> &actions);
 
@@ -61,7 +65,7 @@ private:
                         const std::array<float, NUM_JOINTS> &dof_vel);
 
   torch::Tensor build_proprio_full(const torch::Tensor &proprio_student,
-                                   const torch::Tensor &yaw_estimate);
+                                   const torch::Tensor &yaw_channels);
 
   void update_obs_history(const torch::Tensor &proprio_full);
 

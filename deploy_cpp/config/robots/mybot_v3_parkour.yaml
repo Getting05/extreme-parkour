@@ -52,6 +52,7 @@ port0: /dev/ttyUSB0
 port1: /dev/ttyUSB1
 imu_topic: /fast_livo2/state6_imu_prop
 height_topic: /height_measurements
+goal_yaw_topic: /parkour/goal_yaw
 imu_yaw_correction_deg: 0.0
 
 robot_name: mybot_v3_parkour
@@ -62,11 +63,13 @@ isaac_xml_relpath: robot/mybot_v3/xml/mybot_v3.xml
 # Observation normalization from training config
 ang_vel_scale: 0.25
 dof_pos_scale: 1.0
-dof_vel_scale: 0.10
+dof_vel_scale: 0.05
 command_scale: 1.0
 action_scale: 0.25
 yaw_scale: 1.5
 height_bias: 0.3
+height_clip_min: -1.0
+height_clip_max: 1.0
 nominal_base_height: 0.34
 height_measurement_scale: 1.0
 height_measurement_offset: 0.0
@@ -94,12 +97,42 @@ cmd_yaw_max: 1.0
 cmd_vx_step: 0.1
 cmd_vy_step: 0.1
 cmd_yaw_step: 0.2
+sim_auto_forward_enable: true
+sim_auto_forward_vx: 0.5
 
 teleop_udp_enable: false
 teleop_udp_port: 9870
 
 height_points_x: [-0.45, -0.3, -0.15, 0.0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1.05, 1.2]
 height_points_y: [-0.75, -0.6, -0.45, -0.3, -0.15, 0.0, 0.15, 0.3, 0.45, 0.6, 0.75]
+
+# MuJoCo sim2sim terrain and goal visualization.
+mujoco_initial_base_pos: [0.0, 0.0, 0.45]
+mujoco_normalize_dynamics: false
+mujoco_terrain: parkour_hurdle
+terrain_collision: box
+terrain_box_stride: 2
+terrain_box_height_step: 0.02
+terrain_seed: 1
+terrain_difficulty: 0.45
+terrain_length: 18.0
+terrain_width: 4.0
+terrain_horizontal_scale: 0.05
+terrain_vertical_scale: 0.005
+terrain_y_range: [-0.4, 0.4]
+terrain_roughness_enable: false
+terrain_height: [0.0, 0.01]
+downsampled_scale: 0.075
+terrain_slope_threshold: 1.5
+num_goals: 8
+next_goal_threshold: 0.2
+reach_goal_delay: 0.1
+visualize_heightmap: false
+heightmap_marker_size: 0.025
+visualize_goals: true
+goal_marker_size: 0.08
+visualize_goal_dirs: true
+goal_dir_marker_radius: 0.018
 
 joy_enable: false
 joy_topic: /joy

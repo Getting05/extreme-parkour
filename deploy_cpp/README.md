@@ -81,7 +81,7 @@ deploy_cpp/
 [0:3]      base_ang_vel                   × 0.25
 [3:5]      roll, pitch                    从 projected_gravity 计算
 [5]        0.0                            masked
-[6:8]      delta_yaw, delta_next_yaw      由 heightmap_encoder 估计，× 1.5
+[6:8]      delta_yaw, delta_next_yaw      优先来自 /parkour/goal_yaw；无 topic 时使用 heightmap_encoder yaw 估计 × 1.5
 [8:10]     0.0, 0.0                       masked commands
 [10]       cmd_vx                         × command_scale
 [11]       1.0                            非gap地形标志
@@ -105,8 +105,8 @@ deploy_cpp/
 每个控制步（20ms）执行以下流程：
 
 1. **构建 proprio_student（49 维）**：从 IMU、电机反馈、指令构建
-2. **HeightmapEncoder 推理**：输入 heightmap(132) + proprio(49) + GRU hidden → 输出 terrain_latent(32) + yaw(2)
-3. **构建 proprio_full（53 维）**：插入 yaw 估计到 [6:8]，足端接触 [49:53] 置零
+2. **HeightmapEncoder 推理**：输入 processed heightmap(132) + yaw-masked proprio(49) + GRU hidden → 输出 terrain_latent(32) + yaw(2)
+3. **构建 proprio_full（53 维）**：优先插入 goal yaw 到 [6:8]，无 goal topic 时插入 yaw 估计，足端接触 [49:53] 置零
 4. **更新观测历史**：将当前 proprio 追加到 10 帧历史缓冲
 5. **HistoryEncoder 推理**：输入 history(10×53) → hist_latent(20)
 6. **ActorBackbone 推理**：输入 cat(proprio_53, terrain_32, zeros_9, hist_20) = 114 → actions(12)
@@ -154,7 +154,7 @@ ros2 launch deploy_cpp deploy.launch.py \
 
 ### 4. MuJoCo 仿真
 
-MuJoCo 仿真环境通过 `sim/mujoco_sim_node.py` 提供，它会启动一个 MuJoCo 物理仿真窗口，并通过 ROS2 topic 与 `deploy_node` 通信。
+MuJoCo 仿真环境通过 `sim/mujoco_sim_node.py` 提供，它会启动一个带 parkour box 地形、goal 点和 base→goal 方向线的 MuJoCo 物理仿真窗口，并通过 ROS2 topic 与 `deploy_node` 通信。
 
 > **⚠️ 键盘控制注意事项**：`ros2 launch` 不会转发 stdin 给子进程，因此**键盘按键（0-6, W/S 等）在 launch 模式下无效**。如果需要键盘控制，请使用下面的"分别启动"方式，用 `ros2 run` 直接启动 deploy_node。
 
@@ -207,6 +207,7 @@ mujoco_sim_node                          deploy_node
 │              │  /fast_livo2/state6_imu │              │
 │  PD Control  │ ──────────────────────→ │  Observation │
 │              │  /height_measurements   │  Builder     │
+│              │  /parkour/goal_yaw      │              │
 │  Viewer      │ ──────────────────────→ │              │
 │              │                         │              │
 │              │  /mujoco/joint_cmd      │  PD Target   │
@@ -218,7 +219,8 @@ mujoco_sim_node                          deploy_node
 |-------|------|------|
 | `/mujoco/joint_state` | sim → deploy | 24 floats: 12 pos + 12 vel |
 | `/fast_livo2/state6_imu_prop` | sim → deploy | 6 floats: 3 ang_vel + 3 proj_gravity |
-| `/height_measurements` | sim → deploy | 132 floats: 12×11 高程距离 |
+| `/height_measurements` | sim → deploy | 132 floats: 12×11 processed heightmap obs, `clip(base_z - 0.3 - terrain_z, -1, 1)` |
+| `/parkour/goal_yaw` | sim → deploy | 3 floats: `[0, delta_yaw, delta_next_yaw]` |
 | `/mujoco/joint_cmd` | deploy → sim | 36 floats: 12 target + 12 kp + 12 kd |
 
 #### 仿真依赖
@@ -267,8 +269,14 @@ kd_joint: [1, ...]     # 速度增益
 ang_vel_scale: 0.25
 dof_vel_scale: 0.05
 action_scale: 0.25
-yaw_scale: 1.5         # yaw 估计缩放系数
+yaw_scale: 1.5         # fallback yaw 估计缩放系数
 clip_actions: 1.2       # 动作裁剪范围
+
+# sim2sim
+goal_yaw_topic: /parkour/goal_yaw
+mujoco_terrain: parkour
+visualize_goals: true
+visualize_goal_dirs: true
 
 # 模型路径
 heightmap_encoder_path: policy/heightmap_encoder.jit

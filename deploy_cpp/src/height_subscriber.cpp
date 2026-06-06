@@ -27,7 +27,7 @@ HeightSubscriber::HeightSubscriber(const std::string &topic,
                             std::placeholders::_1));
 
   RCLCPP_INFO(get_logger(),
-              "Subscribing height measurements: %s (distance = raw * %.3f + %.3f)",
+              "Subscribing heightmap observations: %s (value = raw * %.3f + %.3f)",
               topic.c_str(), measurement_scale_, measurement_offset_);
 }
 

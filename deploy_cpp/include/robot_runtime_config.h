@@ -52,6 +52,7 @@ struct RobotRuntimeConfig {
   std::string port1 = "/dev/ttyUSB1";
   std::string imu_topic = "/fast_livo2/state6_imu_prop";
   std::string height_topic = "/height_measurements";
+  std::string goal_yaw_topic = "/parkour/goal_yaw";
   float imu_yaw_correction_deg = 0.0f;
 
   std::string robot_name = "mybot_v3_parkour";
@@ -67,8 +68,9 @@ struct RobotRuntimeConfig {
   float action_scale = 0.25f;
   float yaw_scale = 1.5f;          // yaw estimate is scaled by 1.5
 
-  // Height observation
-  float height_bias = 0.3f;        // root_z - 0.3 - measured_heights in training
+  // Height observation. MuJoCo sim publishes processed training-form heightmap
+  // values: clip(root_z - 0.3 - terrain_z, -1, 1).
+  float height_bias = 0.3f;
   float nominal_base_height = 0.34f;
   float height_measurement_scale = 1.0f;
   float height_measurement_offset = 0.0f;
@@ -95,6 +97,8 @@ struct RobotRuntimeConfig {
   float cmd_vx_step = 0.1f;
   float cmd_vy_step = 0.1f;
   float cmd_yaw_step = 0.2f;
+  bool sim_auto_forward_enable = false;
+  float sim_auto_forward_vx = 0.5f;
 
   float clip_obs = 100.0f;
   float clip_actions = 1.2f;      // from training: normalization.clip_actions
@@ -125,7 +129,7 @@ struct RobotRuntimeConfig {
   bool debug_print_policy = true;
   int debug_print_interval = 50;
 
-  bool enable_debug_log_mode = true;
+  bool enable_debug_log_mode = false;
   std::string debug_log_path = "parkour_debug.log";
 };
 

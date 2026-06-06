@@ -11,6 +11,7 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <thread>
 
@@ -164,6 +165,63 @@ private:
   rclcpp::Subscription<std_msgs::msg::Float32MultiArray>::SharedPtr sub_;
 };
 
+class GoalYawSubscriber : public rclcpp::Node {
+public:
+  explicit GoalYawSubscriber(const std::string &topic)
+      : Node("goal_yaw_subscriber") {
+    goal_yaw_.fill(0.0f);
+
+    rclcpp::QoS qos(rclcpp::KeepLast(1));
+    qos.best_effort();
+    qos.durability_volatile();
+
+    sub_ = create_subscription<std_msgs::msg::Float32MultiArray>(
+        topic, qos,
+        [this](const std_msgs::msg::Float32MultiArray::SharedPtr msg) {
+          if (msg->data.size() != 2 && msg->data.size() != 3) {
+            RCLCPP_WARN_THROTTLE(
+                get_logger(), *get_clock(), 2000,
+                "Goal yaw msg has %zu floats, expected 2 or 3",
+                msg->data.size());
+            return;
+          }
+
+          std::array<float, 3> next{0.0f, 0.0f, 0.0f};
+          if (msg->data.size() == 2) {
+            next[1] = msg->data[0];
+            next[2] = msg->data[1];
+          } else {
+            next[0] = msg->data[0];
+            next[1] = msg->data[1];
+            next[2] = msg->data[2];
+          }
+
+          {
+            std::lock_guard<std::mutex> lock(mutex_);
+            goal_yaw_ = next;
+          }
+          received_.store(true, std::memory_order_release);
+          msg_count_.fetch_add(1, std::memory_order_relaxed);
+        });
+
+    RCLCPP_INFO(get_logger(), "Subscribing goal yaw: %s", topic.c_str());
+  }
+
+  std::array<float, 3> get_goal_yaw() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return goal_yaw_;
+  }
+
+  bool is_ready() const { return received_.load(std::memory_order_acquire); }
+
+private:
+  rclcpp::Subscription<std_msgs::msg::Float32MultiArray>::SharedPtr sub_;
+  mutable std::mutex mutex_;
+  std::array<float, 3> goal_yaw_{};
+  std::atomic<bool> received_{false};
+  std::atomic<uint64_t> msg_count_{0};
+};
+
 class DeployNode : public rclcpp::Node {
 public:
   DeployNode() : Node("deploy_node") {
@@ -205,6 +263,7 @@ public:
                                                  config_.nominal_base_height,
                                                  config_.height_measurement_scale,
                                                  config_.height_measurement_offset);
+    goal_yaw_ = std::make_shared<GoalYawSubscriber>(config_.goal_yaw_topic);
 
     if (sim_mode_) {
       mujoco_motor_ = std::make_unique<MujocoMotorDriver>(this, config_);
@@ -245,6 +304,7 @@ public:
         while (rclcpp::ok() && !keyboard_->is_exit()) {
           rclcpp::spin_some(imu_);
           rclcpp::spin_some(height_);
+          rclcpp::spin_some(goal_yaw_);
           rclcpp::spin_some(shared_from_this());
           const bool fresh_joint = mujoco_motor_->msg_count() > last_joint_count;
           const bool fresh_imu = imu_->msg_count() > last_imu_count;
@@ -258,6 +318,7 @@ public:
       } else {
         rclcpp::spin_some(imu_);
         rclcpp::spin_some(height_);
+        rclcpp::spin_some(goal_yaw_);
         if (sim_mode_) {
           rclcpp::spin_some(shared_from_this());
         }
@@ -546,7 +607,7 @@ private:
       for (float h : height_distances) {
         if (!std::isfinite(h) || h < config_.height_distance_min ||
             h > config_.height_distance_max) {
-          reason = "height distance out of range";
+          reason = "heightmap observation out of range";
           return false;
         }
       }
@@ -572,7 +633,7 @@ private:
     height_stats(height_distances, h_min, h_max, h_mean);
     std::cout << "\n[RL_INPUT_BLOCKED] " << reason << " grav=[" << gravity[0]
               << ", " << gravity[1] << ", " << gravity[2]
-              << "] |g|=" << vector_norm3(gravity) << " height_dist[min,max,mean]=["
+              << "] |g|=" << vector_norm3(gravity) << " height_obs[min,max,mean]=["
               << h_min << ", " << h_max << ", " << h_mean << "]"
               << " imu=" << (imu_->is_ready() ? "OK" : "WAIT")
               << " height=" << (height_->is_ready() ? "OK" : "FALLBACK")
@@ -584,6 +645,7 @@ private:
     const auto ang_vel = imu_->get_ang_vel();
     const auto gravity = imu_->get_projected_gravity();
     const auto height_distances = height_->get_distances();
+    const auto goal_yaw = goal_yaw_->get_goal_yaw();
     std::string unsafe_reason;
     if (!policy_inputs_safe(gravity, height_distances, unsafe_reason)) {
       print_policy_input_warning(unsafe_reason, gravity, height_distances);
@@ -594,7 +656,8 @@ private:
     std::array<float, NUM_ACTIONS> actions{};
     std::array<float, NUM_JOINTS> target{};
     policy_->step(commands, ang_vel, gravity, get_dof_pos(), get_dof_vel(),
-                  height_distances, target, actions);
+                  height_distances, goal_yaw, goal_yaw_->is_ready(), target,
+                  actions);
     last_safe_target_ = target;
     send_to_motors(target, config_.kp_joint, config_.kd_joint);
   }
@@ -647,6 +710,7 @@ private:
     const auto ang_vel = imu_->get_ang_vel();
     const auto gravity = imu_->get_projected_gravity();
     const auto height_distances = height_->get_distances();
+    const auto goal_yaw = goal_yaw_->get_goal_yaw();
     std::string unsafe_reason;
     if (!policy_inputs_safe(gravity, height_distances, unsafe_reason)) {
       print_policy_input_warning(unsafe_reason, gravity, height_distances);
@@ -655,7 +719,8 @@ private:
     }
 
     policy_->step(commands, ang_vel, gravity, get_dof_pos(), get_dof_vel(),
-                  height_distances, target, actions);
+                  height_distances, goal_yaw, goal_yaw_->is_ready(), target,
+                  actions);
     pending_target_ = target;
     ++single_step_count_;
     single_step_pending_ = true;
@@ -676,9 +741,12 @@ private:
               << " height=" << (height_->is_ready() ? "OK" : "FALLBACK")
               << " grav=[" << gravity[0] << ", " << gravity[1] << ", "
               << gravity[2] << "] |g|=" << vector_norm3(gravity)
-              << " height_dist[min,max,mean]=[" << h_min << ", " << h_max
+              << " height_obs[min,max,mean]=[" << h_min << ", " << h_max
               << ", " << h_mean << "] max|action|=" << max_abs_action
               << "\n";
+    std::cout << "goal_yaw=[" << goal_yaw[0] << ", " << goal_yaw[1] << ", "
+              << goal_yaw[2] << "] goal="
+              << (goal_yaw_->is_ready() ? "OK" : "FALLBACK") << "\n";
     std::cout << std::left << std::setw(18) << "Joint" << std::right
               << std::setw(10) << "q" << std::setw(10) << "dq"
               << std::setw(10) << "action" << std::setw(10) << "target"
@@ -705,7 +773,16 @@ private:
     if (udp_ctrl_ && udp_ctrl_->has_data()) {
       return {udp_vx_, udp_vy_, udp_yaw_};
     }
-    return keyboard_->get_commands();
+    auto commands = keyboard_->get_commands();
+    const bool no_manual_cmd =
+        std::fabs(commands[0]) < config_.cmd_deadband &&
+        std::fabs(commands[1]) < config_.cmd_deadband &&
+        std::fabs(commands[2]) < config_.cmd_deadband;
+    if (sim_mode_ && config_.sim_auto_forward_enable &&
+        goal_yaw_->is_ready() && no_manual_cmd) {
+      commands[0] = config_.sim_auto_forward_vx;
+    }
+    return commands;
   }
 
   void send_to_motors(const std::array<float, NUM_JOINTS> &target,
@@ -768,6 +845,7 @@ private:
     std::cout << "\r[" << robot_state_name(sm_->state()) << "] loop="
               << loop_count << " imu=" << (imu_->is_ready() ? "OK" : "WAIT")
               << " height=" << (height_->is_ready() ? "OK" : "FALLBACK")
+              << " goal=" << (goal_yaw_->is_ready() ? "OK" : "FALLBACK")
               << " input=" << input_source
               << " cmd=[" << std::fixed << std::setprecision(2)
               << commands[0] << "," << commands[1] << "," << commands[2]
@@ -794,6 +872,7 @@ private:
 
   std::shared_ptr<IMUSubscriber> imu_;
   std::shared_ptr<HeightSubscriber> height_;
+  std::shared_ptr<GoalYawSubscriber> goal_yaw_;
   std::unique_ptr<MotorDriver> motor_;
   std::unique_ptr<FakeMotorDriver> fake_motor_;
   std::unique_ptr<MujocoMotorDriver> mujoco_motor_;

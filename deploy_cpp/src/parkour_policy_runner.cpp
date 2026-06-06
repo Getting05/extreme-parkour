@@ -4,10 +4,11 @@
  *
  * Inference pipeline per step:
  *   1. Build proprio_student (49d) from sensor data
- *   2. Call heightmap_encoder(heightmap, proprio_student, gru_hidden)
+ *   2. Call heightmap_encoder(processed_heightmap, yaw-masked
+ *      proprio_student, gru_hidden)
  *      → terrain_latent(32) + yaw(2), new_hidden
- *   3. Build proprio_full (53d): insert yaw at [6,7], zero foot_contacts
- * [49:53]
+ *   3. Build proprio_full (53d): insert goal yaw at [6,7] when available,
+ *      otherwise insert encoder yaw estimate, zero foot_contacts [49:53]
  *   4. Update obs_history with current proprio (yaw masked at [6:8] in history)
  *   5. Call history_encoder(obs_history) → hist_latent (20d)
  *   6. Build actor input: cat(proprio_53, terrain_latent_32, zeros_9,
@@ -249,8 +250,8 @@ torch::Tensor ParkourPolicyRunner::build_proprio_student(
 
 torch::Tensor
 ParkourPolicyRunner::build_proprio_full(const torch::Tensor &proprio_student,
-                                        const torch::Tensor &yaw_estimate) {
-  // Build 53-dim full proprio by appending zeroed foot_contacts
+                                        const torch::Tensor &yaw_channels) {
+  // Build 53-dim full proprio by appending zeroed foot contacts.
   auto proprio_full = torch::zeros(
       {1, N_PROPRIO},
       torch::TensorOptions().dtype(torch::kFloat32).device(device_));
@@ -260,12 +261,14 @@ ParkourPolicyRunner::build_proprio_full(const torch::Tensor &proprio_student,
       {torch::indexing::Slice(), torch::indexing::Slice(0, N_PROPRIO_STUDENT)},
       proprio_student);
 
-  // Insert yaw estimates at [6:8] (scaled by yaw_scale)
+  // Insert final yaw observations at [6:8]. External goal yaw is already in
+  // training units; fallback encoder yaw is scaled before this function.
   proprio_full.index_put_(
       {torch::indexing::Slice(), torch::indexing::Slice(6, 8)},
-      yaw_estimate * config_.yaw_scale);
+      yaw_channels);
 
-  // [49:53] foot_contacts remain zero
+  // [49:53] foot_contacts remain zero. This matches this repository's
+  // exported three-part JIT contract in robot_config.h.
 
   return proprio_full;
 }
@@ -319,6 +322,7 @@ void ParkourPolicyRunner::step(
     const std::array<float, NUM_JOINTS> &dof_pos,
     const std::array<float, NUM_JOINTS> &dof_vel,
     const std::array<float, NUM_HEIGHT_POINTS> &height_measurements,
+    const std::array<float, 3> &goal_yaw, bool goal_yaw_ready,
     std::array<float, NUM_JOINTS> &target_dof_pos,
     std::array<float, NUM_ACTIONS> &actions) {
   torch::NoGradGuard no_grad;
@@ -327,13 +331,12 @@ void ParkourPolicyRunner::step(
   auto proprio_student = build_proprio_student(
       commands, ang_vel, projected_gravity, dof_pos, dof_vel);
 
-  // 2. Prepare heightmap tensor
-  // Height measurements are already pre-processed by height_subscriber
-  // Here we apply the same transform as training: clip(distance - 0.3, -1, 1)
-  // The height_subscriber provides raw distances; we pass them directly
+  // 2. Prepare heightmap tensor.
+  // The sim publishes the same processed training observation:
+  //   clip(root_z - 0.3 - measured_terrain_height, -1, 1)
+  // Real sources should be adapted to this same convention before this runner.
   auto height_tensor = tensor_from_float_array(height_measurements, device_);
-  height_tensor =
-      torch::clamp(height_tensor - config_.height_bias, -1.0f, 1.0f);
+  height_tensor = torch::clamp(height_tensor, -1.0f, 1.0f);
 
   // Mask yaw in student proprio for encoder input (set [6:8] to 0)
   auto proprio_for_encoder = proprio_student.clone();
@@ -360,8 +363,17 @@ void ParkourPolicyRunner::step(
        torch::indexing::Slice(HEIGHTMAP_LATENT_DIM,
                               torch::indexing::None)}); // (1, 2)
 
-  // 4. Build full proprio (53d) with yaw inserted and foot_contacts zeroed
-  auto proprio_full = build_proprio_full(proprio_student, yaw_estimate);
+  torch::Tensor yaw_channels;
+  if (goal_yaw_ready) {
+    const std::array<float, 2> goal_yaw_channels = {goal_yaw[1], goal_yaw[2]};
+    yaw_channels = tensor_from_float_array(goal_yaw_channels, device_);
+  } else {
+    yaw_channels = yaw_estimate * config_.yaw_scale;
+  }
+
+  // 4. Build full proprio (53d) with goal/estimated yaw inserted and
+  // foot_contacts zeroed.
+  auto proprio_full = build_proprio_full(proprio_student, yaw_channels);
 
   // 5. Update observation history
   update_obs_history(proprio_full);
@@ -398,14 +410,18 @@ void ParkourPolicyRunner::step(
   if (config_.debug_print_policy &&
       infer_count_ % static_cast<uint64_t>(config_.debug_print_interval) ==
           0U) {
-    auto yaw_cpu = yaw_estimate.cpu().contiguous();
+    auto yaw_est_cpu = yaw_estimate.cpu().contiguous();
+    auto yaw_obs_cpu = yaw_channels.cpu().contiguous();
     std::cout << "\n[ParkourPolicyRunner] step=" << infer_count_ << " cmd=["
               << commands[0] << "," << commands[1] << "," << commands[2]
               << "] action[0:3]=[" << actions[0] << "," << actions[1] << ","
               << actions[2] << "] target[0:3]=[" << target_dof_pos[0] << ","
               << target_dof_pos[1] << "," << target_dof_pos[2] << "] yaw_est=["
-              << yaw_cpu.data_ptr<float>()[0] << ","
-              << yaw_cpu.data_ptr<float>()[1] << "]" << std::endl;
+              << yaw_est_cpu.data_ptr<float>()[0] << ","
+              << yaw_est_cpu.data_ptr<float>()[1] << "] yaw_obs=["
+              << yaw_obs_cpu.data_ptr<float>()[0] << ","
+              << yaw_obs_cpu.data_ptr<float>()[1] << "] goal="
+              << (goal_yaw_ready ? "OK" : "FALLBACK") << std::endl;
   }
 
   if (config_.enable_debug_log_mode && debug_log_file_.is_open()) {

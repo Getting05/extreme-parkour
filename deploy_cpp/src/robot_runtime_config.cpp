@@ -181,6 +181,8 @@ RobotRuntimeConfig load_robot_runtime_config(const std::string &yaml_file) {
       parse_optional<std::string>(root, "imu_topic", cfg.imu_topic);
   cfg.height_topic =
       parse_optional<std::string>(root, "height_topic", cfg.height_topic);
+  cfg.goal_yaw_topic =
+      parse_optional<std::string>(root, "goal_yaw_topic", cfg.goal_yaw_topic);
   cfg.imu_yaw_correction_deg = parse_optional<float>(
       root, "imu_yaw_correction_deg", cfg.imu_yaw_correction_deg);
 
@@ -249,6 +251,10 @@ RobotRuntimeConfig load_robot_runtime_config(const std::string &yaml_file) {
       parse_optional<float>(root, "cmd_vy_step", cfg.cmd_vy_step);
   cfg.cmd_yaw_step =
       parse_optional<float>(root, "cmd_yaw_step", cfg.cmd_yaw_step);
+  cfg.sim_auto_forward_enable = parse_optional<bool>(
+      root, "sim_auto_forward_enable", cfg.sim_auto_forward_enable);
+  cfg.sim_auto_forward_vx =
+      parse_optional<float>(root, "sim_auto_forward_vx", cfg.sim_auto_forward_vx);
   cfg.clip_obs = parse_optional<float>(root, "clip_obs", cfg.clip_obs);
   cfg.clip_actions =
       parse_optional<float>(root, "clip_actions", cfg.clip_actions);
