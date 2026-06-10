@@ -93,6 +93,7 @@ https://github.com/Toni-SM/skrl
 | 深度相机 58x87 图像输入 | LiDAR 高程图 N 点 1D 向量输入 |
 | CNN + GRU 编码器 | MLP + GRU 编码器 |
 | 保留 foot_contacts (4维) | 去除 foot_contacts（置零屏蔽） |
+| 使用显式 goal yaw | 可选 `mybot_v3_goal_free` 屏蔽 goal yaw |
 | `learn_vision` 训练路径 | `learn_heightmap` 训练路径 |
 
 ### 架构设计
@@ -113,6 +114,13 @@ https://github.com/Toni-SM/skrl
   L_yaw    = ||yaw_student - yaw_teacher||₂
   L_latent = ||heightmap_latent - scandots_latent_teacher||₂
 ```
+
+Goal-Free 学生版本:
+- 任务名：`mybot_v3_goal_free`
+- 保持输入维度不变，通过置零屏蔽 proprio 中的 goal yaw 槽位 `6:8`
+- 保留速度 command，不屏蔽期望前进速度
+- foot_contacts 仍按 heightmap student 方案置零
+- `HeightmapEncoder` 仍输出 `terrain_latent + yaw`，但 goal-free actor 不再把 yaw 写回 obs
 
 ### 使用教程
 
@@ -144,6 +152,13 @@ class MybotV3RoughCfgPPO(LeggedRobotCfgPPO):
         latent_loss_weight = 1.0
         action_loss_weight = 1.0
         yaw_loss_weight = 1.0
+
+class MybotV3GoalFreeRoughCfgPPO(MybotV3RoughCfgPPO):
+    class heightmap_encoder(MybotV3RoughCfgPPO.heightmap_encoder):
+        goal_free_student = True
+        goal_yaw_slice = [6, 8]
+        feed_estimated_yaw = False
+        yaw_loss_weight = 0.0
 ```
 
 #### 2. 训练第一阶段教师模型（不变）
@@ -157,8 +172,17 @@ python train.py --task mybot_v3 --exptid 001-01-teacher --device cuda:0
 
 #### 3. 训练第二阶段 Heightmap 蒸馏
 
+保留 goal yaw 的原版 heightmap student：
+
 ```bash
 python train.py --task mybot_v3 --exptid 002-01-heightmap-student --device cuda:0 \
+    --resume --resumeid 001-01
+```
+
+屏蔽 goal yaw 的 goal-free heightmap student：
+
+```bash
+python train.py --task mybot_v3_goal_free --exptid 003-01-heightmap-goal-free --device cuda:0 \
     --resume --resumeid 001-01
 ```
 
@@ -168,11 +192,26 @@ python train.py --task mybot_v3 --exptid 002-01-heightmap-student --device cuda:
 - 从教师 actor 权重初始化 `heightmap_actor`
 - `heightmap_encoder` 从零开始训练
 - foot_contacts 在 student obs 中被置零（当前帧 + 10帧历史）
+- `mybot_v3_goal_free` 额外将当前帧和 10 帧历史中的 goal yaw `6:8` 置零
 
 #### 4. 播放/评估蒸馏策略
 
+播放原版 heightmap student：
+
 ```bash
 python play.py --task mybot_v3 --exptid 002-01
+```
+
+播放 goal-free heightmap student：
+
+```bash
+python play.py --task mybot_v3_goal_free --exptid 003-01
+```
+
+评估 goal-free heightmap student：
+
+```bash
+python evaluate.py --task mybot_v3_goal_free --exptid 003-01
 ```
 
 #### 5. 关键参数调节
@@ -186,12 +225,16 @@ python play.py --task mybot_v3 --exptid 002-01
 | `latent_loss_weight` | latent 蒸馏损失权重 | 0.5-2.0 |
 | `action_loss_weight` | 动作蒸馏损失权重 | 1.0 |
 | `yaw_loss_weight` | yaw 估计损失权重 | 0.5-1.0 |
+| `goal_free_student` | 是否屏蔽 goal yaw 输入 | `False` 或 `True` |
+| `goal_yaw_slice` | goal yaw 在 proprio 中的位置 | `[6, 8]` |
+| `feed_estimated_yaw` | 是否把 encoder yaw 回填到 actor obs | goal-free 使用 `False` |
 
 #### 6. 部署注意事项
 
 部署时，学生策略的输入为：
 - **Proprioception (49维)**: IMU + 关节角度/速度/上一步动作（无 foot_contacts）
 - **LiDAR Heightmap (132点)**: 机器人周围的相对高程采样
+- **Goal-Free 版本**: 不需要提供 goal yaw，proprio/actor obs 中 `6:8` 固定填 0；速度 command 仍保留
 
 推理流程：
 ```python
@@ -211,6 +254,17 @@ obs_full = build_obs_with_zero_foot_contacts(proprio, yaw_estimate)
 action = heightmap_actor(obs_full, hist_encoding=True, scandots_latent=terrain_latent)
 ```
 
+Goal-Free 推理差异：
+```python
+# encoder 输入仍是 49维 proprio，但 goal yaw 槽位置零
+proprio[:, 6:8] = 0
+
+# actor 输入保持 53维；不回填 yaw_estimate，goal yaw 和 foot_contacts 都填 0
+obs_full = build_obs_with_zero_goal_yaw_and_foot_contacts(proprio)
+obs_history[:, :, 6:8] = 0
+action = heightmap_actor(obs_full, hist_encoding=True, scandots_latent=terrain_latent)
+```
+
 ### 文件修改清单
 
 | 文件 | 改动 |
@@ -218,10 +272,12 @@ action = heightmap_actor(obs_full, hist_encoding=True, scandots_latent=terrain_l
 | `rsl_rl/modules/heightmap_backbone.py` | **新建** HeightmapMLPBackbone + HeightmapEncoder |
 | `rsl_rl/modules/__init__.py` | 添加 heightmap 导入 |
 | `rsl_rl/algorithms/ppo.py` | 新增 heightmap 初始化 + `update_heightmap_actor()` |
-| `rsl_rl/runners/on_policy_runner.py` | 新增 `learn_heightmap()` + save/load/inference |
+| `rsl_rl/runners/on_policy_runner.py` | 新增 `learn_heightmap()` + goal-free mask + save/load/inference |
 | `legged_gym/envs/base/legged_robot_config.py` | 新增 heightmap 配置类 |
 | `legged_gym/envs/base/legged_robot.py` | 新增 `get_noisy_heightmap()` |
-| `legged_gym/envs/mybot_v3/mybot_v3_config.py` | 启用 heightmap + 关闭 foot_contacts |
+| `legged_gym/envs/mybot_v3/mybot_v3_config.py` | 启用 heightmap + 关闭 foot_contacts + 新增 goal-free 配置 |
+| `legged_gym/envs/__init__.py` | 注册 `mybot_v3_goal_free` |
+| `legged_gym/scripts/play.py`, `evaluate.py` | 支持 heightmap/goal-free student 播放和评估 |
 
 ---
 

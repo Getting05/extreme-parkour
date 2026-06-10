@@ -129,10 +129,15 @@ def play(args):
     estimator = ppo_runner.get_estimator_inference_policy(device=env.device)
     if env.cfg.depth.use_camera:
         depth_encoder = ppo_runner.get_depth_encoder_inference_policy(device=env.device)
+    if ppo_runner.if_heightmap:
+        heightmap_encoder = ppo_runner.get_heightmap_encoder_inference_policy(device=env.device)
+        heightmap_actor = ppo_runner.get_heightmap_actor_inference_policy(device=env.device)
+        heightmap_latent_dim = ppo_runner.heightmap_encoder_cfg.get("output_dim", 32)
 
     actions = torch.zeros(env.num_envs, 12, device=env.device, requires_grad=False)
     infos = {}
     infos["depth"] = env.depth_buffer.clone().to(ppo_runner.device)[:, -1] if ppo_runner.if_depth else None
+    infos["heightmap"] = env.get_noisy_heightmap().to(env.device) if ppo_runner.if_heightmap else None
 
     for i in range(10*int(env.max_episode_length)):
         if args.use_jit:
@@ -147,7 +152,20 @@ def play(args):
                 obs_jit = torch.cat((obs.detach()[:, :env_cfg.env.n_proprio+env_cfg.env.n_priv], obs.detach()[:, -env_cfg.env.history_len*env_cfg.env.n_proprio:]), dim=1)
                 actions = policy(obs_jit)
         else:
-            if env.cfg.depth.use_camera:
+            if ppo_runner.if_heightmap:
+                if infos["heightmap"] is not None:
+                    obs_prop_student = ppo_runner.build_heightmap_student_proprio(obs)
+                    with torch.no_grad():
+                        heightmap_latent_and_yaw = heightmap_encoder(infos["heightmap"], obs_prop_student)
+                    depth_latent = heightmap_latent_and_yaw[:, :-2]
+                    yaw = 1.5 * heightmap_latent_and_yaw[:, -2:]
+                    obs_student = ppo_runner.build_heightmap_student_obs(
+                        obs, yaw=yaw, delta_yaw_ok=infos.get("delta_yaw_ok")
+                    )
+                else:
+                    depth_latent = torch.zeros(obs.shape[0], heightmap_latent_dim, device=obs.device)
+                    obs_student = ppo_runner.build_heightmap_student_obs(obs)
+            elif env.cfg.depth.use_camera:
                 if infos["depth"] is not None:
                     obs_student = obs[:, :env.cfg.env.n_proprio].clone()
                     obs_student[:, 6:8] = 0
@@ -158,8 +176,11 @@ def play(args):
                     
             else:
                 depth_latent = None
+                obs_student = obs
             
-            if hasattr(ppo_runner.alg, "depth_actor"):
+            if ppo_runner.if_heightmap:
+                actions = heightmap_actor(obs_student.detach(), hist_encoding=True, scandots_latent=depth_latent)
+            elif hasattr(ppo_runner.alg, "depth_actor"):
                 actions = ppo_runner.alg.depth_actor(obs.detach(), hist_encoding=True, scandots_latent=depth_latent)
             else:
                 actions = policy(obs.detach(), hist_encoding=True, scandots_latent=depth_latent)

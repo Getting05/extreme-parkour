@@ -145,6 +145,47 @@ class OnPolicyRunner:
         self.tot_time = 0
         self.current_learning_iteration = 0
         
+    def _heightmap_goal_yaw_slice(self):
+        return self.heightmap_encoder_cfg.get("goal_yaw_slice", [6, 8])
+
+    def _heightmap_goal_free_student(self):
+        return self.heightmap_encoder_cfg.get("goal_free_student", False)
+
+    def _heightmap_feed_estimated_yaw(self):
+        return self.heightmap_encoder_cfg.get("feed_estimated_yaw", True)
+
+    def build_heightmap_student_proprio(self, obs):
+        n_proprio_student = self.heightmap_encoder_cfg["n_proprio_student"]
+        obs_prop_student = obs[:, :n_proprio_student].clone()
+        goal_start, goal_end = self._heightmap_goal_yaw_slice()
+        obs_prop_student[:, goal_start:goal_end] = 0
+        return obs_prop_student
+
+    def build_heightmap_student_obs(self, obs, yaw=None, delta_yaw_ok=None):
+        n_proprio = self.env.cfg.env.n_proprio
+        n_proprio_student = self.heightmap_encoder_cfg["n_proprio_student"]
+        history_len = self.env.cfg.env.history_len
+        goal_start, goal_end = self._heightmap_goal_yaw_slice()
+
+        obs_student = obs.clone()
+        if self._heightmap_feed_estimated_yaw() and yaw is not None:
+            if delta_yaw_ok is None:
+                obs_student[:, goal_start:goal_end] = yaw.detach()
+            else:
+                delta_yaw_ok = delta_yaw_ok.to(device=obs_student.device, dtype=torch.bool)
+                obs_student[delta_yaw_ok, goal_start:goal_end] = yaw.detach()[delta_yaw_ok]
+
+        if self._heightmap_goal_free_student():
+            obs_student[:, goal_start:goal_end] = 0
+
+        obs_student[:, n_proprio_student:n_proprio] = 0
+        history_start = obs_student.shape[1] - history_len * n_proprio
+        for h in range(history_len):
+            frame_start = history_start + h * n_proprio
+            if self._heightmap_goal_free_student():
+                obs_student[:, frame_start + goal_start:frame_start + goal_end] = 0
+            obs_student[:, frame_start + n_proprio_student:frame_start + n_proprio] = 0
+        return obs_student
 
     def learn_RL(self, num_learning_iterations, init_at_random_ep_len=False):
         mean_value_loss = 0.
@@ -379,11 +420,6 @@ class OnPolicyRunner:
         self.alg.heightmap_encoder.train()
         self.alg.heightmap_actor.train()
 
-        n_proprio = self.env.cfg.env.n_proprio  # 53 (teacher proprio dim)
-        # foot_contacts are the last 4 dims of proprio (see compute_observations)
-        # student proprio = proprio without foot_contacts = first 49 dims
-        n_proprio_student = self.heightmap_encoder_cfg["n_proprio_student"]  # 49
-
         num_pretrain_iter = 0
         for it in range(self.current_learning_iteration, tot_iter):
             start = time.time()
@@ -402,9 +438,7 @@ class OnPolicyRunner:
                         scandots_latent = self.alg.actor_critic.actor.infer_scandots_latent(obs)
                     scandots_latent_buffer.append(scandots_latent)
 
-                    # Student proprio: remove foot_contacts (last 4 dims of proprio)
-                    obs_prop_student = obs[:, :n_proprio_student].clone()
-                    obs_prop_student[:, 6:8] = 0  # mask yaw in student proprio
+                    obs_prop_student = self.build_heightmap_student_proprio(obs)
 
                     # Student: encode heightmap
                     heightmap_latent_and_yaw = self.alg.heightmap_encoder(
@@ -424,19 +458,9 @@ class OnPolicyRunner:
                     )
                     actions_teacher_buffer.append(actions_teacher)
 
-                # Student action: replace yaw with estimated yaw, use heightmap latent
-                # Mask foot_contacts in student obs to prevent observation leakage
-                obs_student = obs.clone()
-                obs_student[infos["delta_yaw_ok"], 6:8] = yaw.detach()[infos["delta_yaw_ok"]]
-                # Zero out foot_contacts in current proprio (indices 49:53)
-                obs_student[:, n_proprio_student:n_proprio] = 0
-                # Zero out foot_contacts in history portion
-                # History layout: obs[:, -history_len*n_proprio:], each frame is n_proprio dims
-                # foot_contacts are at offset [n_proprio_student : n_proprio] within each frame
-                history_start = obs_student.shape[1] - self.env.cfg.env.history_len * n_proprio
-                for h in range(self.env.cfg.env.history_len):
-                    frame_start = history_start + h * n_proprio
-                    obs_student[:, frame_start + n_proprio_student: frame_start + n_proprio] = 0
+                obs_student = self.build_heightmap_student_obs(
+                    obs, yaw=yaw, delta_yaw_ok=infos["delta_yaw_ok"]
+                )
 
                 delta_yaw_ok_buffer.append(
                     torch.nonzero(infos["delta_yaw_ok"]).size(0) / infos["delta_yaw_ok"].numel()
@@ -792,4 +816,17 @@ class OnPolicyRunner:
     def get_depth_encoder_inference_policy(self, device=None):
         self.alg.depth_encoder.eval()
         if device is not None:
-            self.alg.depth_e
+            self.alg.depth_encoder.to(device)
+        return self.alg.depth_encoder
+
+    def get_heightmap_actor_inference_policy(self, device=None):
+        self.alg.heightmap_actor.eval()
+        if device is not None:
+            self.alg.heightmap_actor.to(device)
+        return self.alg.heightmap_actor
+
+    def get_heightmap_encoder_inference_policy(self, device=None):
+        self.alg.heightmap_encoder.eval()
+        if device is not None:
+            self.alg.heightmap_encoder.to(device)
+        return self.alg.heightmap_encoder

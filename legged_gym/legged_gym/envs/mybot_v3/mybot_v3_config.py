@@ -103,3 +103,18 @@ class MybotV3RoughCfgPPO(LeggedRobotCfgPPO):
     class runner(LeggedRobotCfgPPO.runner):
         run_name = ""
         experiment_name = "rough_mybot_v3"
+
+
+class MybotV3GoalFreeRoughCfg(MybotV3RoughCfg):
+    pass
+
+
+class MybotV3GoalFreeRoughCfgPPO(MybotV3RoughCfgPPO):
+    class heightmap_encoder(MybotV3RoughCfgPPO.heightmap_encoder):
+        goal_free_student = True
+        goal_yaw_slice = [6, 8]
+        feed_estimated_yaw = False
+        yaw_loss_weight = 0.0
+
+    class runner(MybotV3RoughCfgPPO.runner):
+        experiment_name = "rough_mybot_v3_goal_free"
