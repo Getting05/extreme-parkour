@@ -186,6 +186,13 @@ python train.py --task mybot_v3_goal_free --exptid 003-01-heightmap-goal-free --
     --resume --resumeid 001-01
 ```
 
+`mybot_v3_goal_free` 默认使用 4096 个并行环境，以降低 heightmap student 蒸馏的显存峰值。如果 21GB 级别显卡仍然 OOM，可以继续降低：
+
+```bash
+python train.py --task mybot_v3_goal_free --exptid 003-01-heightmap-goal-free --device cuda:0 \
+    --resume --resumeid 001-01 --num_envs 2048
+```
+
 当配置中 `heightmap.use_heightmap = True` 时，runner 自动选择 `learn_heightmap` 训练路径。
 
 训练 5-10k iterations。学生模型：

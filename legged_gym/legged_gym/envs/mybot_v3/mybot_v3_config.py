@@ -106,7 +106,10 @@ class MybotV3RoughCfgPPO(LeggedRobotCfgPPO):
 
 
 class MybotV3GoalFreeRoughCfg(MybotV3RoughCfg):
-    pass
+    class env(MybotV3RoughCfg.env):
+        # Goal-free heightmap distillation keeps an extra student actor/encoder
+        # resident on GPU. 4096 is a safer default for 21-24GB cards.
+        num_envs = 4096
 
 
 class MybotV3GoalFreeRoughCfgPPO(MybotV3RoughCfgPPO):
