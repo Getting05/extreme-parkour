@@ -31,7 +31,13 @@
 import numpy as np
 import os
 import inspect
+import sys
 from datetime import datetime
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "../../.."))
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "rsl_rl"))
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "legged_gym"))
 
 import isaacgym
 from legged_gym.envs import *
