@@ -137,6 +137,8 @@ def play(args):
         heightmap_encoder = ppo_runner.get_heightmap_encoder_inference_policy(device=env.device)
         heightmap_actor = ppo_runner.get_heightmap_actor_inference_policy(device=env.device)
         heightmap_latent_dim = ppo_runner.heightmap_encoder_cfg.get("output_dim", 32)
+        if ppo_runner.heightmap_encoder_cfg.get("goal_free_student", False):
+            print("Goal-free heightmap eval: env still tracks goals for metrics, but policy obs[:, 6:8] and history goal yaw are masked to zero.")
     
     total_steps = 1000
     rewbuffer = deque(maxlen=total_steps)

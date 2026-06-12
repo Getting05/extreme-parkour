@@ -125,6 +125,12 @@ def play(args):
     ppo_runner, train_cfg, log_pth = task_registry.make_alg_runner(log_root = log_pth, env=env, name=args.task, args=args, train_cfg=train_cfg, return_log_dir=True)
     
     if args.use_jit:
+        if ppo_runner.if_heightmap:
+            raise NotImplementedError(
+                "Heightmap/goal-free play does not use the legacy --use_jit path. "
+                "Run without --use_jit so play.py can mask goal yaw and call the "
+                "heightmap encoder + actor."
+            )
         path = os.path.join(log_pth, "traced")
         model, checkpoint = get_load_path(root=path, checkpoint=args.checkpoint)
         path = os.path.join(path, model)
@@ -139,6 +145,8 @@ def play(args):
         heightmap_encoder = ppo_runner.get_heightmap_encoder_inference_policy(device=env.device)
         heightmap_actor = ppo_runner.get_heightmap_actor_inference_policy(device=env.device)
         heightmap_latent_dim = ppo_runner.heightmap_encoder_cfg.get("output_dim", 32)
+        if ppo_runner.heightmap_encoder_cfg.get("goal_free_student", False):
+            print("Goal-free heightmap play: env still tracks goals, but policy obs[:, 6:8] and history goal yaw are masked to zero.")
 
     actions = torch.zeros(env.num_envs, 12, device=env.device, requires_grad=False)
     infos = {}

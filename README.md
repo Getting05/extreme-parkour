@@ -215,6 +215,8 @@ python play.py --task mybot_v3 --exptid 002-01
 python play.py --task mybot_v3_goal_free --exptid 003-01
 ```
 
+注意：goal-free 只表示**策略输入**不包含 goal yaw。仿真环境仍会维护 waypoint/goal，用于生成 parkour 任务、判断是否到达、统计 waypoint 数量等；`play.py` 会在 policy 前向前把当前帧和历史帧中的 `6:8` 置零。Heightmap/goal-free 版本不要使用旧的 `--use_jit` 播放路径。
+
 评估 goal-free heightmap student：
 
 ```bash
