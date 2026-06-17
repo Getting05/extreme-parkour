@@ -68,19 +68,19 @@
             <site name="imu" pos="0 0 0" />
 
             <body name="FL_hip" pos="0.15078 0.062035 0.0028793">
-                <inertial pos="0.06912954 0.00308032 -0.00003864" mass="0.88715151" fullinertia="0.00069961 0.00185100 0.00156540 -0.00005524 0.00000161 -0.00000029" />
+                <inertial pos="0.06912954 0.00308032 -0.00003864" mass="0.88715151" fullinertia="0.00069961 0.00185101 0.00156540 -0.00005524 0.00000161 -0.00000029" />
                 <joint class="abduction" name="FL_hip_joint" pos="0 0 0" axis="1 0 0" range="-0.8 0.8" />
                 <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="1 1 1 1" mesh="FL_hip" />
                 <geom size="0.04 0.03" euler="1.5707963 0 0" type="cylinder" rgba="0.913 0.913 0.847 0" />
 
                 <body name="FL_thigh" pos="0.0889996956253644 0.0289500000000045 0">
-                    <inertial pos="-0.00157835 0.05108903 -0.03349728" mass="1.44059854" fullinertia="0.00712300 0.00681289 0.00198498 0.00006001 -0.00006848 0.00118491" />
+                    <inertial pos="-0.02888348 0.05108903 -0.02037010" mass="1.44059854" fullinertia="0.00402900 0.00718366 0.00544974 0.00102313 -0.00259373 0.00071731" />
                     <joint class="thigh" name="FL_thigh_joint" pos="0 0 0" axis="0 1 0" range="-1.04 4.18" />
                     <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="1 1 1 1" mesh="FL_thigh" />
                     <geom size="0.02 0.02 0.1" pos="0 0.08 -0.1" type="box" rgba="0.913 0.913 0.847 0" />
                     
                     <body name="FL_calf" pos="0 0.075299999999995 -0.220000271728273">
-                        <inertial pos="0.00128763 0.00019208 -0.06746137" mass="0.23708419" fullinertia="0.00201781 0.00206401 0.00012004 -0.00000038 0.00025632 0.00000347" />
+                        <inertial pos="0.05156601 0.00018731 -0.04379412" mass="0.23708419" fullinertia="0.00070235 0.00207462 0.00144807 -0.00000272 0.00091520 0.00000190" />
                         <joint class="calf" name="FL_calf_joint" pos="0 0 0" axis="0 1 0" range="-2.69 -0.91" />
                         <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.847 0.847 0.847 1" mesh="FL_calf" />
                         <geom size="0.01 0.01 0.1" pos="0 0 -0.1" type="box" rgba="0 0 0 0" />
@@ -95,19 +95,19 @@
             </body>
 
             <body name="FR_hip" pos="0.15078 -0.061965 0.0028793">
-                <inertial pos="0.06924677 -0.00308032 -0.00003847" mass="0.88715151" fullinertia="0.00069961 0.00185513 0.00156952 0.00005408 -0.00000026 0.00000029" />
+                <inertial pos="0.06924676 -0.00308032 -0.00003847" mass="0.88715151" fullinertia="0.00069961 0.00185513 0.00156952 0.00005408 -0.00000026 0.00000029" />
                 <joint class="abduction" name="FR_hip_joint" pos="0 0 0" axis="1 0 0" range="-0.8 0.8" />
                 <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="1 1 1 1" mesh="FR_hip" />
                 <geom size="0.04 0.03" euler="1.5707963 0 0" type="cylinder" rgba="0.913 0.913 0.847 0" />
 
                 <body name="FR_thigh" pos="0.0889996956253649 -0.0289500000000027 0">
-                    <inertial pos="-0.00165058 -0.05108904 -0.03349728" mass="1.44059854" fullinertia="0.00712300 0.00681255 0.00198464 -0.00005712 -0.00006685 -0.00118491" />
+                    <inertial pos="-0.02893003 -0.05108904 -0.02031487" mass="1.44059854" fullinertia="0.00403040 0.00718302 0.00544770 -0.00102127 -0.00259435 -0.00071952" />
                     <joint class="thigh" name="FR_thigh_joint" pos="0 0 0" axis="0 1 0" range="-1.04 4.18" />
                     <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="1 1 1 1" mesh="FR_thigh" />
                     <geom size="0.02 0.02 0.1" pos="0 -0.08 -0.1" type="box" rgba="0.913 0.913 0.847 0" />
                     
                     <body name="FR_calf" pos="0 -0.0752999999999995 -0.220000271728275">
-                        <inertial pos="0.00128778 0.00059175 -0.06722727" mass="0.23765586" fullinertia="0.00208296 0.00206862 0.00018061 0.00000010 0.00025619 -0.00002062" />
+                        <inertial pos="0.05155465 -0.00019685 -0.04378873" mass="0.23708419" fullinertia="0.00070228 0.00207435 0.00144787 0.00000301 0.00091508 -0.00000213" />
                         <joint class="calf" name="FR_calf_joint" pos="0 0 0" axis="0 1 0" range="-2.69 -0.91" />
                         <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.847 0.847 0.847 1" mesh="FR_calf" />
                         <geom size="0.01 0.01 0.1" pos="0 0 -0.1" type="box" rgba="0 0 0 0" />
@@ -128,13 +128,13 @@
                 <geom size="0.04 0.03" euler="1.5707963 0 0" type="cylinder" rgba="0.913 0.913 0.847 0" />
 
                 <body name="RL_thigh" pos="-0.0889996956253643 0.0289499874999981 0">
-                    <inertial pos="-0.00160464 0.05142477 -0.03321690" mass="1.45185979" fullinertia="0.00716742 0.00683898 0.00201350 0.00006033 -0.00006711 0.00116896" />
+                    <inertial pos="-0.02981118 0.05142476 -0.01901311" mass="1.45185979" fullinertia="0.00384286 0.00725341 0.00575250 0.00104947 -0.00254354 0.00066590" />
                     <joint class="thigh" name="RL_thigh_joint" pos="0 0 0" axis="0 1 0" range="-1.04 4.18" />
                     <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="1 1 1 1" mesh="RL_thigh" />
                     <geom size="0.02 0.02 0.1" pos="0 0.08 -0.1" type="box" rgba="0.913 0.913 0.847 0" />
                     
                     <body name="RL_calf" pos="0 0.0752999999999953 -0.220000271728273">
-                        <inertial pos="0.00125720 0.00001358 -0.06699953" mass="0.23880158" fullinertia="0.00202425 0.00207095 0.00011991 0.00000000 0.00025653 -0.00000027" />
+                        <inertial pos="0.05423569 0.00000883 -0.03966053" mass="0.23880158" fullinertia="0.00057526 0.00208160 0.00158150 0.00000037 0.00085435 -0.00000027" />
                         <joint class="calf" name="RL_calf_joint" pos="0 0 0" axis="0 1 0" range="-2.69 -0.91" />
                         <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.847 0.847 0.847 1" mesh="RL_calf" />
                         <geom size="0.01 0.01 0.1" pos="0 0 -0.1" type="box" rgba="0 0 0 0" />
@@ -155,13 +155,13 @@
                 <geom size="0.04 0.03" euler="1.5707963 0 0" type="cylinder" rgba="0.913 0.913 0.847 0" />
 
                 <body name="RR_thigh" pos="-0.0889996956253639 -0.0289499875000004 0">
-                    <inertial pos="-0.00167539 -0.05090610 -0.02942817" mass="1.42118841" fullinertia="0.00608478 0.00578599 0.00198060 -0.00005774 -0.00007671 -0.00103286" />
+                    <inertial pos="-0.02978034 -0.05141831 -0.01902502" mass="1.45068546" fullinertia="0.00384080 0.00724711 0.00574630 -0.00104560 -0.00254723 -0.00067018" />
                     <joint class="thigh" name="RR_thigh_joint" pos="0 0 0" axis="0 1 0" range="-1.04 4.18" />
                     <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="1 1 1 1" mesh="RR_thigh" />
                     <geom size="0.02 0.02 0.1" pos="0 -0.08 -0.1" type="box" rgba="0.913 0.913 0.847 0" />
                     
                     <body name="RR_calf" pos="0 -0.0752999999999974 -0.220000271728273">
-                        <inertial pos="0.00105039 -0.00009676 -0.06329053" mass="0.25719862" fullinertia="0.00207090 0.00210651 0.00013106 -0.00000003 0.00026042 0.00000158" />
+                        <inertial pos="0.05424733 -0.00001831 -0.03966504" mass="0.23880158" fullinertia="0.00057532 0.00208188 0.00158173 -0.00000006 0.00085447 0.00000006" />
                         <joint class="calf" name="RR_calf_joint" pos="0 0 0" axis="0 1 0" range="-2.69 -0.91" />
                         <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.847 0.847 0.847 1" mesh="RR_calf" />
                         <geom size="0.01 0.01 0.1" pos="0 0 -0.1" type="box" rgba="0 0 0 0" />
